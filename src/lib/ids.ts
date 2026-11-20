@@ -1,29 +1,12 @@
 import { ObjectId } from 'mongodb';
 
-/** Accepts either a 24-character ObjectId string or a plain string id. */
+/** Accepts a 24-character ObjectId string from a route or session. */
 export function toObjectId(value: string): ObjectId | null {
   if (!ObjectId.isValid(value)) return null;
   return new ObjectId(value);
 }
 
-/**
- * Mongo documents in this project were seeded with a mix of ObjectId and
- * string ids. Query with both shapes until the seed data is normalised.
- */
-export function idFilter(value: string): Record<string, unknown> {
-  const objectId = toObjectId(value);
-  return objectId ? { $in: [objectId, value] } : { $in: [value] };
-}
-
-export function idsEqual(
-  left: unknown,
-  right: unknown,
-): boolean {
-  if (left == null || right == null) return false;
-  return String(left) === String(right);
-}
-
-/** Recursively converts ObjectIds and Dates into JSON-safe values. */
+/** Converts ObjectIds and dates into values that can be sent as JSON. */
 export function serialize<T>(value: T): T {
   if (value instanceof ObjectId) return value.toHexString() as T;
   if (value instanceof Date) return value.toISOString() as T;

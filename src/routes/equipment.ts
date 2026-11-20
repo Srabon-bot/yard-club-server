@@ -1,8 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { Router, type Request, type Response } from 'express';
-import type { Document, Filter } from 'mongodb';
 import { getDb } from '../db.js';
-import { idFilter, idsEqual, toApi, toObjectId, slugify } from '../lib/ids.js';
+import { toApi, toObjectId, slugify } from '../lib/ids.js';
 import { loadUser, requireRole } from '../middleware/internal-auth.js';
 
 const router = Router();
@@ -59,21 +58,21 @@ router.get(
   async (request: Request, response: Response) => {
     try {
       const user = request.user!;
+      const ownerId = toObjectId(user.id);
+      if (!ownerId) {
+        response.status(401).json({ error: 'Invalid user id.' });
+        return;
+      }
+
       const requested = text(request.query.status).toLowerCase();
       if (requested && requested !== 'all' && !STATUSES.has(requested)) {
         validationError(response, 'status', 'Unknown equipment status.');
         return;
       }
 
-      const scope = {
-        $or: [
-          { ownerId: idFilter(user.id) },
-          { ownerSlug: user.slug },
-        ],
-      } as Filter<Document>;
-
+      const scope = { ownerId };
       const query = requested && requested !== 'all'
-        ? ({ $and: [scope, { status: requested }] } as Filter<Document>)
+        ? { ownerId, status: requested }
         : scope;
 
       const collection = getDb().collection('equipment');
@@ -114,6 +113,12 @@ router.post(
   async (request: Request, response: Response) => {
     try {
       const user = request.user!;
+      const ownerId = toObjectId(user.id);
+      if (!ownerId) {
+        response.status(401).json({ error: 'Invalid user id.' });
+        return;
+      }
+
       const body = request.body ?? {};
 
       const name = text(body.name);
@@ -189,7 +194,6 @@ router.post(
         : baseSlug;
 
       const now = new Date().toISOString();
-      const ownerId = toObjectId(user.id) ?? user.id;
       const listing = {
         name,
         brand,
@@ -238,22 +242,30 @@ router.delete(
   async (request: Request, response: Response) => {
     try {
       const user = request.user!;
+      const ownerId = toObjectId(user.id);
+      if (!ownerId) {
+        response.status(401).json({ error: 'Invalid user id.' });
+        return;
+      }
+
       const equipmentId = Array.isArray(request.params.id)
         ? (request.params.id[0] ?? '')
         : request.params.id;
+      const objectId = toObjectId(equipmentId);
+      if (!objectId) {
+        response.status(404).json({ error: 'Equipment not found.' });
+        return;
+      }
+
       const collection = getDb().collection('equipment');
-      const listing = await collection.findOne({
-        _id: idFilter(equipmentId) as never,
-      });
+      const listing = await collection.findOne({ _id: objectId });
 
       if (!listing) {
         response.status(404).json({ error: 'Equipment not found.' });
         return;
       }
 
-      const ownsListing =
-        idsEqual(listing.ownerId, user.id) ||
-        (Boolean(listing.ownerSlug) && listing.ownerSlug === user.slug);
+      const ownsListing = String(listing.ownerId) === String(ownerId);
 
       if (user.role !== 'admin' && !ownsListing) {
         response.status(403).json({ error: 'You can only delete your own equipment.' });
@@ -261,15 +273,9 @@ router.delete(
       }
 
       await collection.deleteOne({ _id: listing._id });
-
-      const favoriteMatch: Filter<Document> = {
-        $or: [
-          { equipmentId: listing._id },
-          { equipmentId: String(listing._id) },
-          ...(listing.slug ? [{ equipmentSlug: listing.slug }] : []),
-        ],
-      };
-      await getDb().collection('favorites').deleteMany(favoriteMatch);
+      await getDb()
+        .collection('favorites')
+        .deleteMany({ equipmentId: listing._id });
 
       response.json({
         deleted: true,

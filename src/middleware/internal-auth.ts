@@ -1,6 +1,6 @@
 import type { NextFunction, Request, Response } from 'express';
 import { getDb } from '../db.js';
-import { idFilter, slugify } from '../lib/ids.js';
+import { slugify, toObjectId } from '../lib/ids.js';
 import type { RequestUser } from '../types/user.js';
 
 const ROLES = new Set<RequestUser['role']>(['customer', 'owner', 'admin']);
@@ -40,9 +40,13 @@ export async function loadUser(
   }
 
   try {
-    const user = await getDb()
-      .collection('user')
-      .findOne({ _id: idFilter(userId) as never });
+    const objectId = toObjectId(userId);
+    if (!objectId) {
+      response.status(401).json({ error: 'Invalid user id.' });
+      return;
+    }
+
+    const user = await getDb().collection('user').findOne({ _id: objectId });
 
     if (!user) {
       response.status(401).json({ error: 'User not found.' });
