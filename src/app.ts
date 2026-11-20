@@ -3,7 +3,7 @@ dotenv.config();
 
 import express, { type Express, type Request, type Response } from 'express';
 import cors from 'cors';
-import { connectToMongoDB, disconnectFromMongoDB, getDb } from './db.js';
+import { connectToMongoDB, disconnectFromMongoDB, client, getDb } from './db.js';
 
 const app: Express = express();
 const port = process.env.PORT || 5000;
@@ -14,6 +14,20 @@ app.use(cors());
 
 app.get('/', (req: Request, res: Response) => {
   res.send('Yardclub server is running');
+});
+
+// GET /users - get all users from database
+app.get('/users', async (req: Request, res: Response) => {
+  try {
+    const database = client.db(process.env.DB_NAME || 'yardclubDB');
+    const myColl = database.collection('user');
+    const cursor = myColl.find({});
+    const allValues = await cursor.toArray();
+    res.json(allValues);
+  } catch (error) {
+    console.error('Error fetching users:', error);
+    res.status(500).json({ error: 'Failed to fetch users' });
+  }
 });
 
 async function startServer() {

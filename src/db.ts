@@ -8,6 +8,8 @@ const uri =
   `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASSWORD}@${process.env.DB_HOST}/`;
 
 export const client = new MongoClient(uri);
+export const database = client.db(process.env.DB_NAME || 'yardclubDB');
+export const usersCollection = database.collection('user');
 
 export async function connectToMongoDB(): Promise<MongoClient | undefined> {
   try {
