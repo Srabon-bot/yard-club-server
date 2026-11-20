@@ -30,6 +30,90 @@ app.get('/users', async (req: Request, res: Response) => {
   }
 });
 
+// GET /equipment - get all equipment items from database
+app.get('/equipment', async (req: Request, res: Response) => {
+  try {
+    const database = client.db(process.env.DB_NAME || 'yardclubDB');
+    const myColl = database.collection('equipment');
+    const cursor = myColl.find({});
+    const allValues = await cursor.toArray();
+    res.json(allValues);
+  } catch (error) {
+    console.error('Error fetching equipment:', error);
+    res.status(500).json({ error: 'Failed to fetch equipment' });
+  }
+});
+
+// GET /bookings - get all rental bookings from database
+app.get('/bookings', async (req: Request, res: Response) => {
+  try {
+    const database = client.db(process.env.DB_NAME || 'yardclubDB');
+    const myColl = database.collection('bookings');
+    const cursor = myColl.find({});
+    const allValues = await cursor.toArray();
+    res.json(allValues);
+  } catch (error) {
+    console.error('Error fetching bookings:', error);
+    res.status(500).json({ error: 'Failed to fetch bookings' });
+  }
+});
+
+// GET /rentals - alias for /bookings
+app.get('/rentals', async (req: Request, res: Response) => {
+  try {
+    const database = client.db(process.env.DB_NAME || 'yardclubDB');
+    const myColl = database.collection('bookings');
+    const cursor = myColl.find({});
+    const allValues = await cursor.toArray();
+    res.json(allValues);
+  } catch (error) {
+    console.error('Error fetching rentals:', error);
+    res.status(500).json({ error: 'Failed to fetch rentals' });
+  }
+});
+
+// GET /categories - get all categories from database
+app.get('/categories', async (req: Request, res: Response) => {
+  try {
+    const database = client.db(process.env.DB_NAME || 'yardclubDB');
+    const myColl = database.collection('categories');
+    const cursor = myColl.find({});
+    const allValues = await cursor.toArray();
+    res.json(allValues);
+  } catch (error) {
+    console.error('Error fetching categories:', error);
+    res.status(500).json({ error: 'Failed to fetch categories' });
+  }
+});
+
+// GET /reviews - get all customer reviews from database
+app.get('/reviews', async (req: Request, res: Response) => {
+  try {
+    const database = client.db(process.env.DB_NAME || 'yardclubDB');
+    const myColl = database.collection('reviews');
+    const cursor = myColl.find({});
+    const allValues = await cursor.toArray();
+    res.json(allValues);
+  } catch (error) {
+    console.error('Error fetching reviews:', error);
+    res.status(500).json({ error: 'Failed to fetch reviews' });
+  }
+});
+
+// GET /favorites - get all saved favorites from database
+app.get('/favorites', async (req: Request, res: Response) => {
+  try {
+    const database = client.db(process.env.DB_NAME || 'yardclubDB');
+    const myColl = database.collection('favorites');
+    const cursor = myColl.find({});
+    const allValues = await cursor.toArray();
+    res.json(allValues);
+  } catch (error) {
+    console.error('Error fetching favorites:', error);
+    res.status(500).json({ error: 'Failed to fetch favorites' });
+  }
+});
+
 async function startServer() {
   await connectToMongoDB();
 
