@@ -4,6 +4,7 @@ dotenv.config();
 import express, { type Express, type Request, type Response } from 'express';
 import cors from 'cors';
 import { connectToMongoDB, disconnectFromMongoDB, client, getDb } from './db.js';
+import equipmentRouter from './routes/equipment.js';
 
 const app: Express = express();
 const port = process.env.PORT || 5000;
@@ -15,6 +16,10 @@ app.use(cors());
 app.get('/', (req: Request, res: Response) => {
   res.send('Yardclub server is running');
 });
+
+// Dashboard routes. These expect the Next.js server to supply the signed-in
+// user through the internal auth bridge.
+app.use('/api/equipment', equipmentRouter);
 
 // GET /users - get all users from database
 app.get('/users', async (req: Request, res: Response) => {
