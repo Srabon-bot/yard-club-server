@@ -3,7 +3,9 @@ dotenv.config();
 
 import express, { type Express, type Request, type Response } from 'express';
 import cors from 'cors';
+import cron, { type ScheduledTask } from 'node-cron';
 import { connectToMongoDB, disconnectFromMongoDB } from './db.js';
+import { sweepBookingStatuses } from './services/booking-status.js';
 import adminRouter from './routes/admin.js';
 import analyticsRouter from './routes/analytics.js';
 import bookingsRouter from './routes/bookings.js';
@@ -14,6 +16,35 @@ import publicRouter from './routes/public.js';
 
 const app: Express = express();
 const port = process.env.PORT || 5000;
+
+/** Opt-in because a single sweep is enough on most deployments. */
+function scheduleBookingStatusSweep(): ScheduledTask | undefined {
+  if (process.env.ENABLE_BOOKING_CRON?.toLowerCase() !== 'true') return undefined;
+
+  const expression = process.env.BOOKING_CRON_SCHEDULE || '0 * * * *';
+  if (!cron.validate(expression)) {
+    console.warn(`Invalid BOOKING_CRON_SCHEDULE "${expression}"; cron disabled.`);
+    return undefined;
+  }
+
+  const task = cron.schedule(
+    expression,
+    async () => {
+      try {
+        const { activated, completed } = await sweepBookingStatuses();
+        console.log(
+          `Booking status sweep: ${activated} activated, ${completed} completed.`,
+        );
+      } catch (error) {
+        console.error('Booking status sweep failed:', error);
+      }
+    },
+    { name: 'booking-status-sweep', timezone: 'UTC', noOverlap: true },
+  );
+
+  console.log(`Booking status cron enabled (${expression} UTC).`);
+  return task;
+}
 
 // Middleware
 app.use(express.json({ limit: '1mb' }));
@@ -46,6 +77,7 @@ app.use((error: Error, _request: Request, response: Response, _next: unknown) =>
 
 async function startServer() {
   await connectToMongoDB();
+  const bookingStatusTask = scheduleBookingStatusSweep();
 
   const server = app.listen(port, () => {
     console.log(`Yardclub server running on http://localhost:${port}`);
@@ -53,6 +85,7 @@ async function startServer() {
 
   const shutdown = async () => {
     console.log('\nShutting down server gracefully...');
+    bookingStatusTask?.stop();
     server.close(async () => {
       await disconnectFromMongoDB();
       console.log('MongoDB connection closed.');
