@@ -4,6 +4,10 @@
 
 **Live API URL:** add the deployed URL here after deployment.
 
+### Demo admin
+
+The shared assignment database includes `admin@yardclub.test` / `Admin@123` with the `admin` role for review. It is a demo credential, not suitable for production.
+
 ## Documentation
 
 - [API reference](./docs/API.md) — public, session, and admin route tables.
