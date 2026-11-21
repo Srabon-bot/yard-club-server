@@ -272,6 +272,19 @@ router.delete(
         return;
       }
 
+      const activeBooking = await getDb().collection('bookings').findOne({
+        equipmentId: listing._id,
+        bookingStatus: { $in: ['active', 'upcoming'] },
+      });
+
+      if (activeBooking) {
+        response.status(409).json({
+          error:
+            'This listing has active or upcoming bookings. Cancel or complete them before deleting it.',
+        });
+        return;
+      }
+
       await collection.deleteOne({ _id: listing._id });
       await getDb()
         .collection('favorites')
