@@ -22,6 +22,16 @@ This bridge is temporary: JWT/JWKS verification and the `verifyToken`/`verifyRen
 - New booking requests are `pending` and `unpaid`. Total = `pricePerDay × quantity × daysBetween(start, end)`.
 - Cancelling a paid booking automatically sets payment status to `refunded`.
 
+## Automatic booking status sweep
+
+When `ENABLE_BOOKING_CRON=true`, the API schedules `sweepBookingStatuses` with `node-cron` (default `0 * * * *`, UTC, no overlapping runs). The sweep uses UTC calendar-day boundaries and is idempotent:
+
+- `upcoming` → `active` once `startDate <= today`.
+- `active` → `completed` once `endDate < today`.
+- `pending`, `cancelled`, and `completed` are left alone; owners still confirm pending requests manually.
+
+A booking that missed both dates while the job was off completes both transitions in one sweep. `npm run bookings:sweep` runs the same service once for manual catch-up and smoke tests. Set `BOOKING_CRON_SCHEDULE` to change the frequency.
+
 ## MongoDB collections
 
 | Collection | Contents |

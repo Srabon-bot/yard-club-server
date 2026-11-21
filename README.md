@@ -34,6 +34,8 @@ npm run dev
 | `DB_NAME` | Database name. Defaults to `yardclubDB`. |
 | `MONGODB_URI` | Optional full connection string. When set, it replaces the `DB_*` SRV values. |
 | `API_INTERNAL_KEY` | Shared server-only key that the Next.js server sends with dashboard requests. |
+| `ENABLE_BOOKING_CRON` | Set to `true` to schedule the automatic booking status sweep. Disabled by default. |
+| `BOOKING_CRON_SCHEDULE` | Optional five-field cron expression, default `0 * * * *`. Runs in UTC. |
 
 ### Scripts
 
@@ -44,5 +46,6 @@ npm run dev
 | `npm run build` | Compile TypeScript to `dist/`. |
 | `npm run start` | Run the compiled server. |
 | `npm run typecheck` | Type-check without emitting files. |
+| `npm run bookings:sweep` | Run one booking status sweep immediately without starting the API. |
 
 The root route `GET /` returns a plain-text health message. Unknown `/api/*` paths return a JSON `404` instead of an HTML page.
