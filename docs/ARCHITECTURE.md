@@ -32,6 +32,10 @@ When `ENABLE_BOOKING_CRON=true`, the API schedules `sweepBookingStatuses` with `
 
 A booking that missed both dates while the job was off completes both transitions in one sweep. `npm run bookings:sweep` runs the same service once for manual catch-up and smoke tests. Set `BOOKING_CRON_SCHEDULE` to change the frequency.
 
+## Booking completion emails
+
+When `ENABLE_EMAIL_NOTIFICATIONS=true`, a booking that moves to `completed` — through the cron sweep or an owner/admin status change — sends two emails: one to the customer and one to the equipment owner. The trigger checks the previous status, so repeated updates to an already-completed booking do not resend. If SMTP is not configured, notices are skipped and logged instead of failing the request. `EMAIL_TRANSPORT=json` prints the messages locally for testing.
+
 ## MongoDB collections
 
 | Collection | Contents |

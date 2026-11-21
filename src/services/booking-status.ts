@@ -1,9 +1,11 @@
 import type { Document } from 'mongodb';
 import { getDb } from '../db.js';
+import { notifyBookingCompleted } from './booking-notifications.js';
 
 export type BookingStatusSweepResult = {
   activated: number;
   completed: number;
+  notified: number;
 };
 
 /**
@@ -25,13 +27,20 @@ export async function sweepBookingStatuses(
     { $set: { bookingStatus: 'active', updatedAt: changedAt } },
   );
 
+  const due = await bookings
+    .find({ bookingStatus: 'active', endDate: { $lt: today } })
+    .toArray();
   const finished = await bookings.updateMany(
     { bookingStatus: 'active', endDate: { $lt: today } },
     { $set: { bookingStatus: 'completed', updatedAt: changedAt } },
+  );
+  const notification = await notifyBookingCompleted(
+    finished.modifiedCount > 0 ? due : [],
   );
 
   return {
     activated: started.modifiedCount,
     completed: finished.modifiedCount,
+    notified: notification.sent,
   };
 }

@@ -40,6 +40,11 @@ npm run dev
 | `API_INTERNAL_KEY` | Shared server-only key that the Next.js server sends with dashboard requests. |
 | `ENABLE_BOOKING_CRON` | Set to `true` to schedule the automatic booking status sweep. Disabled by default. |
 | `BOOKING_CRON_SCHEDULE` | Optional five-field cron expression, default `0 * * * *`. Runs in UTC. |
+| `ENABLE_EMAIL_NOTIFICATIONS` | Set to `true` to email the customer and owner when a booking completes. |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE` | SMTP server for completion emails; port defaults to `587`. |
+| `SMTP_USER`, `SMTP_PASS` | Optional SMTP credentials when the server requires authentication. |
+| `EMAIL_FROM` | Sender address shown on completion emails. |
+| `EMAIL_TRANSPORT` | Set to `json` for local preview instead of sending through SMTP. |
 
 ### Scripts
 

@@ -20,6 +20,7 @@ import {
 } from '../lib/http.js';
 import { toApi, toObjectId } from '../lib/ids.js';
 import { loadUser } from '../middleware/internal-auth.js';
+import { notifyBookingCompleted } from '../services/booking-notifications.js';
 
 const router = Router();
 
@@ -403,6 +404,14 @@ router.patch('/:id', loadUser, async (request: Request, response: Response) => {
     await collection.updateOne({ _id: bookingId }, { $set: update });
     const saved = await collection.findOne({ _id: bookingId });
     const [enriched] = saved ? await enrichBookings([saved]) : [null];
+
+    if (
+      update.bookingStatus === 'completed' &&
+      String(booking.bookingStatus) !== 'completed' &&
+      saved
+    ) {
+      void notifyBookingCompleted([saved]);
+    }
 
     response.json({ item: enriched });
   } catch (error) {

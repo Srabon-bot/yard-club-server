@@ -31,9 +31,9 @@ function scheduleBookingStatusSweep(): ScheduledTask | undefined {
     expression,
     async () => {
       try {
-        const { activated, completed } = await sweepBookingStatuses();
+        const { activated, completed, notified } = await sweepBookingStatuses();
         console.log(
-          `Booking status sweep: ${activated} activated, ${completed} completed.`,
+          `Booking status sweep: ${activated} activated, ${completed} completed, ${notified} emails sent.`,
         );
       } catch (error) {
         console.error('Booking status sweep failed:', error);
