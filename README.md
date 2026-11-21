@@ -1,7 +1,19 @@
-# yard-club-server
+# Yardclub Server
 
-Express API for the Yardclub equipment rental platform. It connects to MongoDB
-and serves the dashboard routes used by the Next.js client.
+**Purpose:** Express + TypeScript API for Yardclub. It serves public catalogue data, customer/owner/admin dashboards, booking requests, favorites, profiles, and analytics from MongoDB.
+
+**Live API URL:** add the deployed URL here after deployment.
+
+## Documentation
+
+- [API reference](./docs/API.md) — public, session, and admin route tables.
+- [Architecture and data model](./docs/ARCHITECTURE.md) — auth bridge, status rules, collections, and scope notes.
+
+## Stack
+
+- Express 5, TypeScript, MongoDB driver
+- cors and dotenv
+- Development tooling: tsx, nodemon, TypeScript
 
 ## Setup
 
@@ -11,28 +23,26 @@ cp .env.example .env
 npm run dev
 ```
 
-Required environment variables:
+### Environment variables
 
 | Name | Purpose |
 | --- | --- |
 | `PORT` | Express port. Defaults to `5000`. |
-| `DB_USER` | MongoDB user. |
-| `DB_PASSWORD` | MongoDB password. |
-| `DB_HOST` | MongoDB cluster host. |
+| `DB_USER` | MongoDB username when building the SRV URI. |
+| `DB_PASSWORD` | MongoDB password when building the SRV URI. |
+| `DB_HOST` | MongoDB cluster host when building the SRV URI. |
 | `DB_NAME` | Database name. Defaults to `yardclubDB`. |
-| `API_INTERNAL_KEY` | Shared secret used by the Next.js server when it calls dashboard routes. |
+| `MONGODB_URI` | Optional full connection string. When set, it replaces the `DB_*` SRV values. |
+| `API_INTERNAL_KEY` | Shared server-only key that the Next.js server sends with dashboard requests. |
 
-## Equipment API
+### Scripts
 
-Dashboard routes are under `/api` and expect the Next.js server to send
-`x-internal-key` plus `x-user-id`. The browser never receives those headers.
-This is a temporary bridge until JWT authentication is added.
+| Command | Purpose |
+| --- | --- |
+| `npm run dev` | Start with nodemon and tsx. |
+| `npm run dev:tsx` | Start with tsx watch. |
+| `npm run build` | Compile TypeScript to `dist/`. |
+| `npm run start` | Run the compiled server. |
+| `npm run typecheck` | Type-check without emitting files. |
 
-| Method | Route | Access | Purpose |
-| --- | --- | --- | --- |
-| `GET` | `/api/equipment/mine?status=all` | Owner/admin | List the signed-in owner's equipment with status counts. |
-| `POST` | `/api/equipment` | Owner/admin | Create a pending equipment listing. |
-| `DELETE` | `/api/equipment/:id` | Owner/admin | Delete an owned listing and its saved favourites. |
-
-The older top-level `GET` routes (`/equipment`, `/bookings`, `/users`, etc.)
-remain available for exploration.
+The root route `GET /` returns a plain-text health message. Unknown `/api/*` paths return a JSON `404` instead of an HTML page.
