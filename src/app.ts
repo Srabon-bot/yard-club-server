@@ -3,120 +3,45 @@ dotenv.config();
 
 import express, { type Express, type Request, type Response } from 'express';
 import cors from 'cors';
-import { connectToMongoDB, disconnectFromMongoDB, client, getDb } from './db.js';
+import { connectToMongoDB, disconnectFromMongoDB } from './db.js';
+import adminRouter from './routes/admin.js';
+import analyticsRouter from './routes/analytics.js';
+import bookingsRouter from './routes/bookings.js';
 import equipmentRouter from './routes/equipment.js';
+import favoritesRouter from './routes/favorites.js';
+import profileRouter from './routes/profile.js';
+import publicRouter from './routes/public.js';
 
 const app: Express = express();
 const port = process.env.PORT || 5000;
 
 // Middleware
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
 app.use(cors());
 
-app.get('/', (req: Request, res: Response) => {
-  res.send('Yardclub server is running');
+app.get('/', (_request: Request, response: Response) => {
+  response.send('Yardclub server is running');
 });
 
-// Dashboard routes. These expect the Next.js server to supply the signed-in
-// user through the internal auth bridge.
+// Public catalogue, owners, reviews and landing-page counters.
+app.use('/api', publicRouter);
+
+// Signed-in routes. The Next.js server supplies the session user through the
+// temporary internal bridge until the JWT middleware lands.
 app.use('/api/equipment', equipmentRouter);
+app.use('/api/bookings', bookingsRouter);
+app.use('/api/favorites', favoritesRouter);
+app.use('/api/profile', profileRouter);
+app.use('/api/analytics', analyticsRouter);
+app.use('/api/admin', adminRouter);
 
-// GET /users - get all users from database
-app.get('/users', async (req: Request, res: Response) => {
-  try {
-    const database = client.db(process.env.DB_NAME || 'yardclubDB');
-    const myColl = database.collection('user');
-    const cursor = myColl.find({});
-    const allValues = await cursor.toArray();
-    res.json(allValues);
-  } catch (error) {
-    console.error('Error fetching users:', error);
-    res.status(500).json({ error: 'Failed to fetch users' });
-  }
+app.use('/api', (_request: Request, response: Response) => {
+  response.status(404).json({ error: 'API route not found.' });
 });
 
-// GET /equipment - get all equipment items from database
-app.get('/equipment', async (req: Request, res: Response) => {
-  try {
-    const database = client.db(process.env.DB_NAME || 'yardclubDB');
-    const myColl = database.collection('equipment');
-    const cursor = myColl.find({});
-    const allValues = await cursor.toArray();
-    res.json(allValues);
-  } catch (error) {
-    console.error('Error fetching equipment:', error);
-    res.status(500).json({ error: 'Failed to fetch equipment' });
-  }
-});
-
-// GET /bookings - get all rental bookings from database
-app.get('/bookings', async (req: Request, res: Response) => {
-  try {
-    const database = client.db(process.env.DB_NAME || 'yardclubDB');
-    const myColl = database.collection('bookings');
-    const cursor = myColl.find({});
-    const allValues = await cursor.toArray();
-    res.json(allValues);
-  } catch (error) {
-    console.error('Error fetching bookings:', error);
-    res.status(500).json({ error: 'Failed to fetch bookings' });
-  }
-});
-
-// GET /rentals - alias for /bookings
-app.get('/rentals', async (req: Request, res: Response) => {
-  try {
-    const database = client.db(process.env.DB_NAME || 'yardclubDB');
-    const myColl = database.collection('bookings');
-    const cursor = myColl.find({});
-    const allValues = await cursor.toArray();
-    res.json(allValues);
-  } catch (error) {
-    console.error('Error fetching rentals:', error);
-    res.status(500).json({ error: 'Failed to fetch rentals' });
-  }
-});
-
-// GET /categories - get all categories from database
-app.get('/categories', async (req: Request, res: Response) => {
-  try {
-    const database = client.db(process.env.DB_NAME || 'yardclubDB');
-    const myColl = database.collection('categories');
-    const cursor = myColl.find({});
-    const allValues = await cursor.toArray();
-    res.json(allValues);
-  } catch (error) {
-    console.error('Error fetching categories:', error);
-    res.status(500).json({ error: 'Failed to fetch categories' });
-  }
-});
-
-// GET /reviews - get all customer reviews from database
-app.get('/reviews', async (req: Request, res: Response) => {
-  try {
-    const database = client.db(process.env.DB_NAME || 'yardclubDB');
-    const myColl = database.collection('reviews');
-    const cursor = myColl.find({});
-    const allValues = await cursor.toArray();
-    res.json(allValues);
-  } catch (error) {
-    console.error('Error fetching reviews:', error);
-    res.status(500).json({ error: 'Failed to fetch reviews' });
-  }
-});
-
-// GET /favorites - get all saved favorites from database
-app.get('/favorites', async (req: Request, res: Response) => {
-  try {
-    const database = client.db(process.env.DB_NAME || 'yardclubDB');
-    const myColl = database.collection('favorites');
-    const cursor = myColl.find({});
-    const allValues = await cursor.toArray();
-    res.json(allValues);
-  } catch (error) {
-    console.error('Error fetching favorites:', error);
-    res.status(500).json({ error: 'Failed to fetch favorites' });
-  }
+app.use((error: Error, _request: Request, response: Response, _next: unknown) => {
+  console.error('Unhandled API error:', error);
+  response.status(500).json({ error: 'Something went wrong on the server.' });
 });
 
 async function startServer() {
@@ -141,5 +66,4 @@ async function startServer() {
 
 startServer();
 
-export { app, getDb };
-
+export { app };

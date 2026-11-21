@@ -53,6 +53,11 @@ export async function loadUser(
       return;
     }
 
+    if (user.status === 'suspended') {
+      response.status(403).json({ error: 'This account is suspended.' });
+      return;
+    }
+
     const role = ROLES.has(user.role as RequestUser['role'])
       ? (user.role as RequestUser['role'])
       : 'customer';

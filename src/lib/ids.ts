@@ -23,11 +23,11 @@ export function serialize<T>(value: T): T {
 }
 
 /** Adds a string `id` field and removes Mongo's `_id` from an API response. */
-export function toApi<T extends { _id: unknown }>(
+export function toApi<T extends { _id?: unknown }>(
   document: T,
 ): Omit<T, '_id'> & { id: string } {
   const { _id, ...rest } = document;
-  return { ...serialize(rest), id: String(_id) };
+  return { ...serialize(rest), id: _id ? String(_id) : '' };
 }
 
 export function slugify(value: string): string {
