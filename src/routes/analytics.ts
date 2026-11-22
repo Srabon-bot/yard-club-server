@@ -3,7 +3,11 @@ import type { Document, Filter, ObjectId } from 'mongodb';
 import { getDb } from '../db.js';
 import { serverError } from '../lib/http.js';
 import { toObjectId } from '../lib/ids.js';
-import { loadUser, requireRole } from '../middleware/internal-auth.js';
+import {
+  verifyAdmin,
+  verifyOwnerOrAdmin,
+  verifyToken,
+} from '../middleware/jwt-auth.js';
 
 const router = Router();
 
@@ -134,8 +138,8 @@ function buildAnalytics(
  */
 router.get(
   '/admin',
-  loadUser,
-  requireRole('admin'),
+  verifyToken,
+  verifyAdmin,
   async (_request: Request, response: Response) => {
     try {
       const { bookings, equipment, totals } = await totalsFor({
@@ -157,8 +161,8 @@ router.get(
  */
 router.get(
   '/owner',
-  loadUser,
-  requireRole('owner', 'admin'),
+  verifyToken,
+  verifyOwnerOrAdmin,
   async (request: Request, response: Response) => {
     try {
       const user = request.user!;

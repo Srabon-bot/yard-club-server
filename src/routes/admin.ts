@@ -16,7 +16,7 @@ import {
   uidParam,
 } from '../lib/http.js';
 import { toObjectId } from '../lib/ids.js';
-import { loadUser, requireRole } from '../middleware/internal-auth.js';
+import { verifyAdmin, verifyToken } from '../middleware/jwt-auth.js';
 
 const router = Router();
 
@@ -47,8 +47,8 @@ function userShape(user: Document) {
  */
 router.get(
   '/users',
-  loadUser,
-  requireRole('admin'),
+  verifyToken,
+  verifyAdmin,
   async (request: Request, response: Response) => {
     try {
       const q = queryText(request.query.q);
@@ -119,8 +119,8 @@ router.get(
  */
 router.patch(
   '/users/:id',
-  loadUser,
-  requireRole('admin'),
+  verifyToken,
+  verifyAdmin,
   async (request: Request, response: Response) => {
     try {
       const actor = request.user!;
@@ -190,8 +190,8 @@ router.patch(
  */
 router.get(
   '/equipment',
-  loadUser,
-  requireRole('admin'),
+  verifyToken,
+  verifyAdmin,
   async (request: Request, response: Response) => {
     try {
       const status = queryText(request.query.status).toLowerCase();

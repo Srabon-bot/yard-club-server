@@ -37,7 +37,7 @@ npm run dev
 | `DB_HOST` | MongoDB cluster host when building the SRV URI. |
 | `DB_NAME` | Database name. Defaults to `yardclubDB`. |
 | `MONGODB_URI` | Optional full connection string. When set, it replaces the `DB_*` SRV values. |
-| `API_INTERNAL_KEY` | Shared server-only key that the Next.js server sends with dashboard requests. |
+| `CLIENT_URL` | Better Auth origin. JWT signatures are verified against `${CLIENT_URL}/api/auth/jwks`. Defaults to `http://localhost:3000`. |
 | `ENABLE_BOOKING_CRON` | Set to `true` to schedule the automatic booking status sweep. Disabled by default. |
 | `BOOKING_CRON_SCHEDULE` | Optional five-field cron expression, default `0 * * * *`. Runs in UTC. |
 | `ENABLE_EMAIL_NOTIFICATIONS` | Set to `true` to email the customer and owner when a booking completes. |

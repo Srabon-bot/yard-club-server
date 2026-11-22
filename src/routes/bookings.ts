@@ -19,7 +19,7 @@ import {
   uidParam,
 } from '../lib/http.js';
 import { toApi, toObjectId } from '../lib/ids.js';
-import { loadUser } from '../middleware/internal-auth.js';
+import { verifyRenter, verifyToken } from '../middleware/jwt-auth.js';
 import { notifyBookingCompleted } from '../services/booking-notifications.js';
 
 const router = Router();
@@ -91,7 +91,7 @@ function statusClause(request: Request): string {
  * A signed-in user requests a rental. The booking starts as pending/unpaid
  * until the Stripe checkout is added; pending reservations still hold stock.
  */
-router.post('/', loadUser, async (request: Request, response: Response) => {
+router.post('/', verifyToken, async (request: Request, response: Response) => {
   try {
     const user = request.user!;
     const customerId = toObjectId(user.id);
@@ -209,7 +209,7 @@ router.post('/', loadUser, async (request: Request, response: Response) => {
  * GET /api/bookings/mine
  * Bookings made by the signed-in customer with status counts.
  */
-router.get('/mine', loadUser, async (request: Request, response: Response) => {
+router.get('/mine', verifyToken, verifyRenter, async (request: Request, response: Response) => {
   try {
     const user = request.user!;
     const customerId = toObjectId(user.id);
@@ -252,7 +252,7 @@ router.get('/mine', loadUser, async (request: Request, response: Response) => {
  * GET /api/bookings
  * Owners see bookings for their own equipment; admins see every booking.
  */
-router.get('/', loadUser, async (request: Request, response: Response) => {
+router.get('/', verifyToken, async (request: Request, response: Response) => {
   try {
     const user = request.user!;
     if (user.role !== 'owner' && user.role !== 'admin') {
@@ -318,7 +318,7 @@ router.get('/', loadUser, async (request: Request, response: Response) => {
  * PATCH /api/bookings/:id
  * Owners move their bookings through fulfilment; customers may cancel.
  */
-router.patch('/:id', loadUser, async (request: Request, response: Response) => {
+router.patch('/:id', verifyToken, async (request: Request, response: Response) => {
   try {
     const user = request.user!;
     const userId = toObjectId(user.id);

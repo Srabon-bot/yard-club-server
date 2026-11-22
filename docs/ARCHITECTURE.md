@@ -1,17 +1,25 @@
 # Architecture and data model
 
-## Authorization bridge
+## Authentication and authorization
 
-The browser never calls dashboard APIs directly. The Next.js server reads the Better Auth session and forwards:
+The browser never calls dashboard APIs directly. The Next.js server reads the Better Auth session, mints a JWT with `auth.api.getToken()`, and forwards:
 
 ```text
-x-internal-key: <API_INTERNAL_KEY>
-x-user-id: <signed-in user id>
+Authorization: Bearer <Better Auth JWT>
 ```
 
-`loadUser` verifies the key, resolves the user from the `user` collection, rejects suspended accounts, and derives the role from the stored `role` field. `requireRole(...roles)` adds role checks to admin and owner routes.
+`verifyToken` validates the signature against Better Auth's JWKS endpoint (`${CLIENT_URL}/api/auth/jwks`) and checks the issuer and audience. It then loads the latest user from the `user` collection (creating one from the token when missing), rejects suspended accounts, and attaches `request.user`. The stored role is authoritative, not the role in the token.
 
-This bridge is temporary: JWT/JWKS verification and the `verifyToken`/`verifyRenter`/`verifyOwner`/`verifyAdmin` middlewares are deliberately out of scope for this build.
+Role guards sit after `verifyToken`:
+
+| Middleware | Allows |
+| --- | --- |
+| `verifyRenter` | `customer` |
+| `verifyOwner` | `owner` |
+| `verifyAdmin` | `admin` |
+| `verifyOwnerOrAdmin` | `owner` or `admin` |
+
+Owner/admin listing routes use `verifyOwnerOrAdmin`; admin routes use `verifyAdmin`; customer rental history uses `verifyRenter`; profile, favorites, and booking routes use `verifyToken` with ownership checks in the controller.
 
 ## Status and inventory rules
 
@@ -53,8 +61,9 @@ Ids are MongoDB `ObjectId` values serialized as 24-character strings. Listing ro
 
 This API intentionally does **not** include:
 
-- JWT/JWKS verification or the assignment's named Express middleware functions. The internal session bridge above handles identity and roles.
 - Stripe Checkout, webhooks, or payment collection. Payment status is an admin-managed field.
 - ImgBB upload. Listing images are direct URLs.
+
+JWT/JWKS verification is implemented with `verifyToken` plus `verifyRenter`, `verifyOwner`, `verifyAdmin`, and `verifyOwnerOrAdmin`.
 
 Input validation, ownership checks, JSON 404 responses, and active-booking delete protection are implemented in the route layer.

@@ -57,8 +57,8 @@ app.get('/', (_request: Request, response: Response) => {
 // Public catalogue, owners, reviews and landing-page counters.
 app.use('/api', publicRouter);
 
-// Signed-in routes. The Next.js server supplies the session user through the
-// temporary internal bridge until the JWT middleware lands.
+// Signed-in routes. The Next.js server forwards a Better Auth JWT, which each
+// router verifies against the Better Auth JWKS before checking the DB role.
 app.use('/api/equipment', equipmentRouter);
 app.use('/api/bookings', bookingsRouter);
 app.use('/api/favorites', favoritesRouter);

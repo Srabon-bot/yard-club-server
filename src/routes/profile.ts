@@ -3,7 +3,7 @@ import { getDb } from '../db.js';
 import { slugFor, toApiUser } from '../lib/equipment-service.js';
 import { badRequest, serverError, text } from '../lib/http.js';
 import { toObjectId } from '../lib/ids.js';
-import { loadUser } from '../middleware/internal-auth.js';
+import { verifyToken } from '../middleware/jwt-auth.js';
 
 const router = Router();
 
@@ -11,7 +11,7 @@ const router = Router();
  * GET /api/profile
  * Full record for the signed-in user.
  */
-router.get('/', loadUser, async (request: Request, response: Response) => {
+router.get('/', verifyToken, async (request: Request, response: Response) => {
   try {
     const userId = toObjectId(request.user!.id);
     if (!userId) {
@@ -42,7 +42,7 @@ router.get('/', loadUser, async (request: Request, response: Response) => {
  * Updates the fields the profile form owns. Email and password stay with
  * Better Auth; image uploads will move to ImgBB later.
  */
-router.patch('/', loadUser, async (request: Request, response: Response) => {
+router.patch('/', verifyToken, async (request: Request, response: Response) => {
   try {
     const userId = toObjectId(request.user!.id);
     if (!userId) {

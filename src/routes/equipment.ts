@@ -24,7 +24,7 @@ import {
   todayIso,
   uidParam,
 } from '../lib/http.js';
-import { loadUser, requireRole } from '../middleware/internal-auth.js';
+import { verifyOwnerOrAdmin, verifyToken } from '../middleware/jwt-auth.js';
 
 const router = Router();
 
@@ -259,8 +259,8 @@ router.get('/stats', async (_request: Request, response: Response) => {
  */
 router.get(
   '/mine',
-  loadUser,
-  requireRole('owner', 'admin'),
+  verifyToken,
+  verifyOwnerOrAdmin,
   async (request: Request, response: Response) => {
     try {
       const user = request.user!;
@@ -403,8 +403,8 @@ router.get('/:id', async (request: Request, response: Response) => {
  */
 router.post(
   '/',
-  loadUser,
-  requireRole('owner', 'admin'),
+  verifyToken,
+  verifyOwnerOrAdmin,
   async (request: Request, response: Response) => {
     try {
       const user = request.user!;
@@ -535,8 +535,8 @@ router.post(
  */
 router.patch(
   '/:id',
-  loadUser,
-  requireRole('owner', 'admin'),
+  verifyToken,
+  verifyOwnerOrAdmin,
   async (request: Request, response: Response) => {
     try {
       const user = request.user!;
@@ -710,8 +710,8 @@ router.patch(
  */
 router.delete(
   '/:id',
-  loadUser,
-  requireRole('owner', 'admin'),
+  verifyToken,
+  verifyOwnerOrAdmin,
   async (request: Request, response: Response) => {
     try {
       const user = request.user!;
