@@ -21,7 +21,8 @@
     "typecheck": "tsc --noEmit",
     "bookings:sweep": "tsx src/scripts/sweep-booking-status.ts",
     "admin:promote": "tsx src/scripts/promote-admin.ts",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "user:set-role": "tsx src/scripts/set-user-role.ts"
   },
   "keywords": [],
   "author": "",
