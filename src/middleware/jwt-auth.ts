@@ -6,7 +6,7 @@ import { slugify, toObjectId } from '../lib/ids.js';
 import type { RequestUser } from '../types/user.js';
 
 const ROLES = new Set<RequestUser['role']>(['customer', 'owner', 'admin']);
-const JWKS_TIMEOUT_MS = 3_000;
+const JWKS_TIMEOUT_MS = 8_000;
 
 let jwks: ReturnType<typeof createRemoteJWKSet> | undefined;
 
@@ -28,7 +28,7 @@ function getJwks(): ReturnType<typeof createRemoteJWKSet> {
     jwks = createRemoteJWKSet(jwksUrl(), {
       timeoutDuration: JWKS_TIMEOUT_MS,
       cooldownDuration: 10_000,
-      cacheMaxAge: 10 * 60_000,
+      cacheMaxAge: 15 * 60_000,
     });
   }
   return jwks;
