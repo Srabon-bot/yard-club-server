@@ -37,7 +37,9 @@ npm run dev
 | `DB_HOST` | MongoDB cluster host when building the SRV URI. |
 | `DB_NAME` | Database name. Defaults to `yardclubDB`. |
 | `MONGODB_URI` | Optional full connection string. When set, it replaces the `DB_*` SRV values. |
-| `CLIENT_URL` | Better Auth origin. JWT signatures are verified against `${CLIENT_URL}/api/auth/jwks`. Defaults to `http://localhost:3000`. |
+| `CLIENT_URL` | Better Auth origin and Checkout redirect base. JWT signatures are verified against `${CLIENT_URL}/api/auth/jwks`. Defaults to `http://localhost:3000`. |
+| `STRIPE_SECRET_KEY` | Stripe test-mode secret key. Required for Checkout, verification, and refunds. Never expose it to the browser. |
+| `STRIPE_WEBHOOK_SECRET` | Signing secret from `stripe listen` locally or the Stripe dashboard in production. Required to accept webhooks. |
 | `ENABLE_BOOKING_CRON` | Set to `true` to schedule the automatic booking status sweep. Disabled by default. |
 | `BOOKING_CRON_SCHEDULE` | Optional five-field cron expression, default `0 * * * *`. Runs in UTC. |
 | `ENABLE_EMAIL_NOTIFICATIONS` | Set to `true` to email the customer and owner when a booking completes. |

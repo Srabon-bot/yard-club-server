@@ -6,7 +6,8 @@
     "jose": "^6.2.18",
     "mongodb": "^7.9.1",
     "node-cron": "^4.6.0",
-    "nodemailer": "^10.6.1"
+    "nodemailer": "^10.6.1",
+    "stripe": "^23.2.0"
   },
   "name": "yardclub-server",
   "version": "1.0.0",

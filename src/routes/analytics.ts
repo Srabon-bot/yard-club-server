@@ -54,43 +54,88 @@ function monthKey(value: unknown): string {
 type AnalyticsScope = {
   bookingFilter: Filter<Document>;
   equipmentFilter: Filter<Document>;
+  paymentFilter: Filter<Document>;
 };
+
+type RevenueEntry = {
+  bookingId: string;
+  amount: number;
+  date: Date;
+};
+
+/**
+ * Payments are the source of truth for new transactions. Paid bookings with no
+ * matching payment record are seeded/legacy data and still count, so existing
+ * dashboard numbers do not disappear after Stripe is introduced.
+ */
+function revenueEntries(bookings: Document[], payments: Document[]): RevenueEntry[] {
+  const recordedBookingIds = new Set(
+    payments.map((payment) => String(payment.bookingId ?? '')).filter(Boolean),
+  );
+  const entries: RevenueEntry[] = [];
+
+  for (const payment of payments) {
+    if (payment.status !== 'paid') continue;
+    const date = new Date(String(payment.paidAt ?? payment.createdAt ?? ''));
+    entries.push({
+      bookingId: String(payment.bookingId ?? ''),
+      amount: Number(payment.amount ?? 0),
+      date,
+    });
+  }
+
+  for (const booking of bookings) {
+    const bookingId = String(booking._id);
+    if (recordedBookingIds.has(bookingId)) continue;
+    if (booking.paymentStatus !== 'paid' || booking.bookingStatus === 'cancelled') {
+      continue;
+    }
+    entries.push({
+      bookingId,
+      amount: Number(booking.total ?? 0),
+      date: new Date(String(booking.createdAt ?? '')),
+    });
+  }
+
+  return entries.filter(
+    (entry) =>
+      Number.isFinite(entry.amount) &&
+      entry.amount > 0 &&
+      !Number.isNaN(entry.date.getTime()),
+  );
+}
 
 async function totalsFor(scope: AnalyticsScope) {
   const db = getDb();
-  const [bookings, equipment, users] = await Promise.all([
+  const [bookings, equipment, users, payments] = await Promise.all([
     db.collection('bookings').find(scope.bookingFilter).toArray(),
     db.collection('equipment').find(scope.equipmentFilter).toArray(),
     db.collection('user').find({}).project({ role: 1 }).toArray(),
+    db.collection('payments').find(scope.paymentFilter).toArray(),
   ]);
 
   const completed = bookings.filter(
     (booking) => booking.bookingStatus === 'completed',
   );
-  const collected = bookings.filter(
-    (booking) =>
-      booking.paymentStatus === 'paid' && booking.bookingStatus !== 'cancelled',
+  const revenue = revenueEntries(bookings, payments).reduce(
+    (sum, entry) => sum + entry.amount,
+    0,
   );
 
   return {
     bookings,
     equipment,
+    payments,
     totals: {
       users: users.length,
       equipment: equipment.length,
       bookings: bookings.length,
       pendingApprovals: equipment.filter((item) => item.status === 'pending').length,
       completedRentals: completed.length,
-      revenue: collected.reduce(
-        (sum, booking) => sum + Number(booking.total ?? 0),
-        0,
-      ),
+      revenue,
       listedEquipment: equipment.filter((item) => item.status === 'approved').length,
       completedOwnerRentals: completed.length,
-      earnings: collected.reduce(
-        (sum, booking) => sum + Number(booking.total ?? 0),
-        0,
-      ),
+      earnings: revenue,
     },
   };
 }
@@ -99,17 +144,19 @@ function buildAnalytics(
   bookings: Document[],
   equipment: Document[],
   totals: Awaited<ReturnType<typeof totalsFor>>['totals'],
+  entries: RevenueEntry[],
 ) {
   const buckets = monthBuckets();
   const byKey = new Map(buckets.map((bucket) => [bucket.key, bucket]));
 
   for (const booking of bookings) {
     const bucket = byKey.get(monthKey(booking.createdAt));
-    if (!bucket) continue;
-    bucket.bookings += 1;
-    if (booking.paymentStatus === 'paid' && booking.bookingStatus !== 'cancelled') {
-      bucket.revenue += Number(booking.total ?? 0);
-    }
+    if (bucket) bucket.bookings += 1;
+  }
+
+  for (const entry of entries) {
+    const bucket = byKey.get(monthKey(entry.date.toISOString()));
+    if (bucket) bucket.revenue += entry.amount;
   }
 
   const categories = new Map<string, number>();
@@ -142,11 +189,14 @@ router.get(
   verifyAdmin,
   async (_request: Request, response: Response) => {
     try {
-      const { bookings, equipment, totals } = await totalsFor({
+      const { bookings, equipment, totals, payments } = await totalsFor({
         bookingFilter: {},
         equipmentFilter: {},
+        paymentFilter: { status: { $in: ['paid', 'refunded'] } },
       });
-      response.json(buildAnalytics(bookings, equipment, totals));
+      response.json(
+        buildAnalytics(bookings, equipment, totals, revenueEntries(bookings, payments)),
+      );
     } catch (error) {
       console.error('Failed to load admin analytics:', error);
       serverError(response, 'Failed to load platform analytics.');
@@ -178,11 +228,14 @@ router.get(
         return;
       }
 
-      const { bookings, equipment, totals } = await totalsFor({
+      const { bookings, equipment, totals, payments } = await totalsFor({
         bookingFilter: { ownerId },
         equipmentFilter: { ownerId },
+        paymentFilter: { ownerId, status: { $in: ['paid', 'refunded'] } },
       });
-      response.json(buildAnalytics(bookings, equipment, totals));
+      response.json(
+        buildAnalytics(bookings, equipment, totals, revenueEntries(bookings, payments)),
+      );
     } catch (error) {
       console.error('Failed to load owner analytics:', error);
       serverError(response, 'Failed to load your analytics.');

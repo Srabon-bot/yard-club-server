@@ -37,7 +37,15 @@ These routes require the internal headers described in [ARCHITECTURE.md](./ARCHI
 | `POST` | `/api/bookings` | Signed-in user | Create a request from dates, quantity, and delivery details. |
 | `GET` | `/api/bookings/mine` | Signed-in user | The caller's bookings with status counts. |
 | `GET` | `/api/bookings` | Owner/admin | All bookings with filters, search, and pagination. |
-| `PATCH` | `/api/bookings/:id` | Owner/customer/admin | Change fulfilment status. Customers may only cancel. Only admins change payment status. |
+| `PATCH` | `/api/bookings/:id` | Owner/customer/admin | Change fulfilment status. Customers may only cancel. Only admins change payment status. Cancelling a paid booking refunds through Stripe. |
+| `POST` | `/api/bookings/:id/checkout` | Renter (owner of booking) | Create a hosted Stripe Checkout session from the stored booking total. Allowed once the booking is `upcoming`. |
+
+### Payments
+
+| Method | Route | Access | Purpose |
+| --- | --- | --- | --- |
+| `POST` | `/api/payments/webhook` | Stripe signature | Raw-body webhook for completed, expired, and failed Checkout/PaymentIntent events. |
+| `POST` | `/api/payments/verify` | Renter | Verify a completed Checkout session on the success page and record the payment idempotently. |
 
 ### Favorites, profile, and analytics
 

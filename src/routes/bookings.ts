@@ -21,6 +21,10 @@ import {
 import { toApi, toObjectId } from '../lib/ids.js';
 import { verifyRenter, verifyToken } from '../middleware/jwt-auth.js';
 import { notifyBookingCompleted } from '../services/booking-notifications.js';
+import {
+  createBookingCheckout,
+  refundBookingPayment,
+} from '../services/payment-service.js';
 
 const router = Router();
 
@@ -315,6 +319,56 @@ router.get('/', verifyToken, async (request: Request, response: Response) => {
 });
 
 /**
+ * POST /api/bookings/:id/checkout
+ * The renter starts Stripe Checkout only after the owner confirmed the dates.
+ * The amount always comes from the stored booking, never from the request.
+ */
+router.post(
+  '/:id/checkout',
+  verifyToken,
+  verifyRenter,
+  async (request: Request, response: Response) => {
+    try {
+      const user = request.user!;
+      const customerId = toObjectId(user.id);
+      const bookingId = toObjectId(uidParam(request));
+      if (!customerId) {
+        response.status(401).json({ error: 'Invalid user id.' });
+        return;
+      }
+      if (!bookingId) {
+        response.status(404).json({ error: 'Booking not found.' });
+        return;
+      }
+
+      const booking = await getDb()
+        .collection('bookings')
+        .findOne({ _id: bookingId, customerId });
+      if (!booking) {
+        response.status(404).json({ error: 'Booking not found.' });
+        return;
+      }
+      if (booking.bookingStatus !== 'upcoming') {
+        response.status(409).json({
+          error: 'The owner must confirm your booking before you can pay.',
+        });
+        return;
+      }
+      if (!['unpaid', 'pending', 'failed'].includes(String(booking.paymentStatus))) {
+        response.status(409).json({ error: 'This booking is already paid.' });
+        return;
+      }
+
+      const checkout = await createBookingCheckout(booking, user.email);
+      response.json({ url: checkout.url, sessionId: checkout.sessionId });
+    } catch (error) {
+      console.error('Failed to create Stripe Checkout session:', error);
+      serverError(response, 'Could not start Stripe Checkout. Try again.');
+    }
+  },
+);
+
+/**
  * PATCH /api/bookings/:id
  * Owners move their bookings through fulfilment; customers may cancel.
  */
@@ -397,6 +451,13 @@ router.patch('/:id', verifyToken, async (request: Request, response: Response) =
       booking.paymentStatus === 'paid' &&
       !('paymentStatus' in update)
     ) {
+      const refund = await refundBookingPayment(bookingId);
+      if (!refund.ok) {
+        response.status(502).json({
+          error: refund.error ?? 'Stripe could not refund this payment.',
+        });
+        return;
+      }
       update.paymentStatus = 'refunded';
     }
 

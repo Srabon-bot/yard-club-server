@@ -28,7 +28,9 @@ Owner/admin listing routes use `verifyOwnerOrAdmin`; admin routes use `verifyAdm
 - Payment status: `unpaid`, `pending`, `paid`, `refunded`, `failed`.
 - `pending`, `upcoming`, and `active` bookings reserve stock. Availability subtracts overlapping hold quantities from listing quantity.
 - New booking requests are `pending` and `unpaid`. Total = `pricePerDay × quantity × daysBetween(start, end)`.
-- Cancelling a paid booking automatically sets payment status to `refunded`.
+- Cancelling a paid booking refunds its Stripe PaymentIntent and sets payment status to `refunded`.
+- Renters pay after the owner confirms a booking (`pending` → `upcoming`). Checkout uses a dynamic `price_data` line item in BDT poisha (`Math.round(total * 100)`); no Stripe Product or Price is pre-created.
+- `checkout.session.completed`, `checkout.session.expired`, and `payment_intent.payment_failed` are handled by the signed webhook. The success page re-verifies the session through `/api/payments/verify`; a shared idempotent writer prevents duplicate payment records.
 
 ## Automatic booking status sweep
 
@@ -50,7 +52,8 @@ When `ENABLE_EMAIL_NOTIFICATIONS=true`, a booking that moves to `completed` — 
 | --- | --- |
 | `user` | Better Auth users plus `role`, `status`, `phone`, `address`, and `bio`. |
 | `equipment` | Listings, approval state, pricing, stock, owner references, and slugs. |
-| `bookings` | Rental requests, delivery details, holds, totals, and status. |
+| `bookings` | Rental requests, delivery details, holds, totals, status, and Stripe session/reference ids. |
+| `payments` | Stripe transaction records with unique session and PaymentIntent ids, amount, status, and timestamps. Revenue analytics prefer this collection and fall back to legacy paid bookings. |
 | `favorites` | User/equipment pairs with lightweight item snapshots. |
 | `reviews` | Ratings and review text tied to equipment and owners. |
 | `categories` | Category display metadata. |
