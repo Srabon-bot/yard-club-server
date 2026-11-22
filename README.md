@@ -4,14 +4,14 @@
 
 ## Deployment status
 
-Vercel configuration is ready for a **two-project** deployment, but deployment has not been performed yet. There is no live API URL at the time of writing.
+Both projects are deployed and connected to their GitHub repositories. Pushes to `main` trigger production deployments automatically.
 
 | Vercel project | Root directory | Runtime | Live URL |
 | --- | --- | --- | --- |
-| Client | `yardclub_client` | Next.js | Fill in after deployment (see client README) |
-| API | `yardclub-server` | Express via `api/index.ts` + `vercel.json` rewrites | Fill in after deployment |
+| Client | `yardclub_client` | Next.js | https://yardclub-client.vercel.app |
+| API | `yardclub-server` | Express via `api/index.ts` + `vercel.json` rewrites | https://yardclub-server.vercel.app |
 
-Record the exact HTTPS origins here after deployment. Do not guess or hard-code preview URLs.
+These are the canonical origins used by `CLIENT_URL`, `CORS_ORIGINS`, and the client's `API_URL`. Do not substitute preview deployment URLs.
 
 ### Assignment-demo admin (not a production feature)
 
