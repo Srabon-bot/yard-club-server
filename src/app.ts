@@ -77,7 +77,13 @@ app.use(
 );
 
 app.get('/', (_request: Request, response: Response) => {
-  response.send('Yardclub server is running');
+  response.json({
+    success: true,
+    data: {
+      service: 'Yardclub API',
+      status: 'running',
+    },
+  });
 });
 
 /** JSON health probe for Vercel/monitoring; cheap enough to call often. */
