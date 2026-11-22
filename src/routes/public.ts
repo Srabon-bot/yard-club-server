@@ -3,6 +3,7 @@ import type { Document, ObjectId } from 'mongodb';
 import { getDb } from '../db.js';
 import {
   availabilityFor,
+  averageEquipmentRating,
   decorateEquipmentList,
   slugFor,
   toApiUser,
@@ -60,17 +61,12 @@ async function ownerStats(): Promise<Map<string, OwnerListingStats>> {
       (sum, item) => sum + Number(item.reviewCount ?? 0),
       0,
     );
-    const weighted = items.reduce(
-      (sum, item) =>
-        sum + Number(item.rating ?? 0) * Number(item.reviewCount ?? 0),
-      0,
-    );
     stats.set(ownerId, {
       count: items.length,
       available: items.filter(
         (item) => availability.get(String(item._id))?.availableNow,
       ).length,
-      rating: reviewCount > 0 ? weighted / reviewCount : 0,
+      rating: averageEquipmentRating(items),
       reviewCount,
       location: String(items[0]?.location ?? ''),
       minRate: Math.min(...items.map((item) => Number(item.pricePerDay ?? 0))),
@@ -328,8 +324,6 @@ router.get('/stats', async (_request: Request, response: Response) => {
     const cities = new Set(
       approved.map((item) => String(item.location ?? '').split(',').pop()?.trim()),
     );
-    const ratings = approved.filter((item) => Number(item.reviewCount ?? 0) > 0);
-
     response.json({
       equipment: {
         total: equipment.length,
@@ -367,10 +361,7 @@ router.get('/stats', async (_request: Request, response: Response) => {
       cities: cities.size,
       reviews,
       minRate: rates.length ? Math.min(...rates) : 0,
-      averageRating: ratings.length
-        ? ratings.reduce((sum, item) => sum + Number(item.rating ?? 0), 0) /
-          ratings.length
-        : 0,
+      averageRating: averageEquipmentRating(approved),
     });
   } catch (error) {
     console.error('Failed to load platform stats:', error);

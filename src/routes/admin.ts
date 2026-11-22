@@ -114,8 +114,8 @@ router.get(
 
 /**
  * PATCH /api/admin/users/:id
- * Role and account status changes. Suspension is enforced by the internal
- * auth bridge on the next request.
+ * Role and account status changes. verifyToken re-reads the stored user record,
+ * so the new role or suspension takes effect on the next request.
  */
 router.patch(
   '/users/:id',

@@ -13,11 +13,33 @@ type FinalizeResult = {
   error?: string;
 };
 
-type RefundResult = { ok: boolean; refunded?: boolean; error?: string };
+type RefundResult = {
+  ok: boolean;
+  refunded?: boolean;
+  alreadyRefunded?: boolean;
+  error?: string;
+};
+
+type RefundInfo = {
+  paymentIntentId: string;
+  refundId?: string;
+  amount?: number;
+  full?: boolean;
+};
+
+const NON_REVERSIBLE_PAYMENT_STATUSES = [
+  'paid',
+  'refunded',
+  'partially_refunded',
+];
 
 let indexesReady: Promise<void> | undefined;
 
-/** Unique payment records make webhook + success-page writes idempotent. */
+/**
+ * Unique payment records make webhook + success-page writes idempotent. The
+ * booking index is partial so failed retries can still be stored while at most
+ * one paid record can exist per booking.
+ */
 export function ensurePaymentIndexes(): Promise<void> {
   if (!indexesReady) {
     indexesReady = getDb()
@@ -35,12 +57,22 @@ export function ensurePaymentIndexes(): Promise<void> {
           unique: true,
           sparse: true,
         },
-        { key: { bookingId: 1 }, name: 'idx_payment_booking' },
+        {
+          key: { bookingId: 1 },
+          name: 'uniq_paid_payment_booking',
+          unique: true,
+          partialFilterExpression: { status: 'paid' },
+        },
       ])
       .then(() => undefined)
       .catch((error: unknown) => {
-        indexesReady = undefined;
-        throw error;
+        // Legacy data may already contain duplicate paid rows. Write paths are
+        // idempotent too, so a failed index migration must not break payments.
+        console.warn(
+          'Payment indexes could not be created:',
+          error instanceof Error ? error.message : error,
+        );
+        indexesReady = Promise.resolve();
       });
   }
   return indexesReady;
@@ -61,6 +93,14 @@ function asText(value: unknown): string {
 function isoDate(value: unknown): string {
   const date = new Date(String(value ?? ''));
   return Number.isNaN(date.getTime()) ? '' : date.toISOString().slice(0, 10);
+}
+
+function idFrom(value: unknown): string {
+  if (typeof value === 'string') return asText(value);
+  if (value && typeof value === 'object' && 'id' in value) {
+    return asText((value as { id?: unknown }).id);
+  }
+  return '';
 }
 
 function isDuplicateKeyError(error: unknown): boolean {
@@ -178,28 +218,39 @@ function paymentIntentId(
   source: Stripe.Checkout.Session | Stripe.PaymentIntent,
 ): string {
   if (!('payment_intent' in source)) return asText(source.id);
-  const value = source.payment_intent;
-  return asText(typeof value === 'string' ? value : value?.id);
+  return idFrom(source.payment_intent);
 }
 
 async function findBookingById(id: NonNullable<ReturnType<typeof toObjectId>>) {
   return getDb().collection('bookings').findOne({ _id: id });
 }
 
+/** Never overwrite a terminal (paid/refunded) booking from a stale webhook. */
 async function setBookingPaymentStatus(
   bookingId: NonNullable<ReturnType<typeof toObjectId>>,
   status: string,
   extra: Document = {},
 ) {
   await getDb().collection('bookings').updateOne(
-    { _id: bookingId, paymentStatus: 'pending' },
+    {
+      _id: bookingId,
+      paymentStatus: { $nin: NON_REVERSIBLE_PAYMENT_STATUSES },
+    },
     { $set: { paymentStatus: status, updatedAt: new Date(), ...extra } },
+  );
+}
+
+async function createRefund(paymentIntentId: string, idempotencyKey: string) {
+  return getStripe().refunds.create(
+    { payment_intent: paymentIntentId, reason: 'requested_by_customer' },
+    { idempotencyKey },
   );
 }
 
 /**
  * Writes the payments record and marks the booking paid. Safe to call from
- * both the webhook and the success page; unique indexes stop duplicates.
+ * both the webhook and the success page; unique indexes and status guards make
+ * duplicates harmless.
  */
 export async function finalizePaidBooking(
   session: Stripe.Checkout.Session,
@@ -224,21 +275,62 @@ export async function finalizePaidBooking(
   const intentId = paymentIntentId(session);
   const amount = Number(booking.total ?? 0);
   const expectedMinor = Math.round(amount * 100);
+  const existing = await payments.findOne({ stripeSessionId: session.id });
+  const paidByBooking = await payments.findOne({ bookingId, status: 'paid' });
+  const reversedByBooking = await payments.findOne({
+    bookingId,
+    status: { $in: ['refunded', 'partially_refunded'] },
+  });
+  const bookingPaymentStatus = String(booking.paymentStatus ?? 'unpaid');
+
+  // Refunds are terminal. A delayed webhook must never make them paid again.
   if (
-    typeof session.amount_total === 'number' &&
+    bookingPaymentStatus === 'refunded' ||
+    existing?.status === 'refunded' ||
+    reversedByBooking
+  ) {
+    return { ok: true, bookingId: String(bookingId), alreadyRecorded: true };
+  }
+
+  if (existing?.status === 'paid' && bookingPaymentStatus === 'paid') {
+    return { ok: true, bookingId: String(bookingId), alreadyRecorded: true };
+  }
+
+  // A mismatch (or a missing amount) is fraud/price drift, not a payment to
+  // book silently.
+  if (
+    !Number.isFinite(expectedMinor) ||
+    expectedMinor <= 0 ||
     session.amount_total !== expectedMinor
   ) {
-    console.warn(
+    console.error(
       `Stripe amount mismatch for ${String(booking.bookingRef ?? bookingId)}: ` +
-        `charged ${session.amount_total}, booking total ${expectedMinor}.`,
+        `charged ${String(session.amount_total ?? 'unknown')}, booking total ${expectedMinor}.`,
     );
+    await recordMismatchedPayment(session, booking, bookingId, intentId);
+    await bookings.updateOne(
+      {
+        _id: bookingId,
+        paymentStatus: { $nin: ['paid', 'refunded', 'partially_refunded'] },
+      },
+      {
+        $set: {
+          paymentStatus: 'failed',
+          paymentError: 'amount_mismatch',
+          updatedAt: new Date(),
+        },
+      },
+    );
+    return {
+      ok: false,
+      error: 'The paid amount does not match the booking total.',
+    };
   }
 
   const now = new Date();
-  const existing = await payments.findOne({ stripeSessionId: session.id });
-  const alreadyRecorded = Boolean(existing);
+  const alreadyRecorded = Boolean(existing || paidByBooking);
 
-  if (!existing) {
+  if (!existing && !paidByBooking) {
     const record: Document = {
       bookingId,
       bookingRef: String(booking.bookingRef ?? ''),
@@ -259,16 +351,31 @@ export async function finalizePaidBooking(
       await payments.insertOne(record);
     } catch (error) {
       if (!isDuplicateKeyError(error)) throw error;
+      // Another webhook/success-page call won the race; it is already paid.
+      return { ok: true, bookingId: String(bookingId), alreadyRecorded: true };
     }
-  } else if (existing.status !== 'paid') {
-    await payments.updateOne(
-      { _id: existing._id },
-      { $set: { status: 'paid', paidAt: now, ...(intentId ? { paymentIntentId: intentId } : {}), updatedAt: now } },
-    );
+  } else {
+    const target = existing ?? paidByBooking;
+    if (target && target.status !== 'paid') {
+      await payments.updateOne(
+        { _id: target._id, status: { $nin: ['refunded', 'partially_refunded'] } },
+        {
+          $set: {
+            status: 'paid',
+            paidAt: now,
+            ...(intentId ? { paymentIntentId: intentId } : {}),
+            updatedAt: now,
+          },
+        },
+      );
+    }
   }
 
   await bookings.updateOne(
-    { _id: bookingId },
+    {
+      _id: bookingId,
+      paymentStatus: { $nin: ['refunded', 'partially_refunded'] },
+    },
     {
       $set: {
         paymentStatus: 'paid',
@@ -277,38 +384,88 @@ export async function finalizePaidBooking(
         paidAt: now,
         updatedAt: now,
       },
+      $unset: { paymentError: '' },
     },
   );
 
   // A renter can cancel while Checkout is still open. If payment lands after
   // that, refund it immediately instead of leaving a paid cancelled booking.
   if (booking.bookingStatus === 'cancelled' && intentId) {
-    try {
-      const refund = await getStripe().refunds.create({
-        payment_intent: intentId,
-        reason: 'requested_by_customer',
-      });
-      await payments.updateOne(
-        { stripeSessionId: session.id },
-        {
-          $set: {
-            status: 'refunded',
-            refundId: refund.id,
-            refundedAt: new Date(),
-            updatedAt: new Date(),
+    const paidPayment = await payments.findOne({ stripeSessionId: session.id });
+    if (paidPayment && paidPayment.status !== 'refunded') {
+      try {
+        const refund = await createRefund(
+          intentId,
+          `yc-refund-late-cancel-${session.id}`,
+        );
+        await payments.updateOne(
+          { _id: paidPayment._id, status: { $ne: 'refunded' } },
+          {
+            $set: {
+              status: 'refunded',
+              refundId: refund.id,
+              refundedAmount: Number(refund.amount ?? amount),
+              refundedAt: new Date(),
+              updatedAt: new Date(),
+            },
           },
-        },
-      );
-      await bookings.updateOne(
-        { _id: bookingId },
-        { $set: { paymentStatus: 'refunded', updatedAt: new Date() } },
-      );
-    } catch (error) {
-      console.error('Automatic refund after cancelled Checkout failed:', error);
+        );
+        await bookings.updateOne(
+          { _id: bookingId, paymentStatus: 'paid' },
+          { $set: { paymentStatus: 'refunded', updatedAt: new Date() } },
+        );
+      } catch (error) {
+        console.error('Automatic refund after cancelled Checkout failed:', error);
+      }
     }
   }
 
   return { ok: true, bookingId: String(bookingId), alreadyRecorded };
+}
+
+async function recordMismatchedPayment(
+  session: Stripe.Checkout.Session,
+  booking: Document,
+  bookingId: NonNullable<ReturnType<typeof toObjectId>>,
+  intentId: string,
+): Promise<void> {
+  const now = new Date();
+  const payments = getDb().collection('payments');
+  const fields: Document = {
+    bookingId,
+    bookingRef: String(booking.bookingRef ?? ''),
+    customerId: booking.customerId,
+    ownerId: booking.ownerId,
+    equipmentId: booking.equipmentId,
+    stripeSessionId: session.id,
+    ...(intentId ? { paymentIntentId: intentId } : {}),
+    amount: Number(booking.total ?? 0),
+    chargedAmount: (session.amount_total ?? 0) / 100,
+    expectedAmount: (Number(booking.total ?? 0) * 100) / 100,
+    currency: asText(session.currency).toLowerCase() || 'bdt',
+    status: 'amount_mismatch',
+    flaggedAt: now,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  const existing = await payments.findOne({ stripeSessionId: session.id });
+  if (existing) {
+    await payments.updateOne(
+      {
+        _id: existing._id,
+        status: { $nin: ['paid', 'refunded', 'partially_refunded'] },
+      },
+      { $set: fields },
+    );
+    return;
+  }
+
+  try {
+    await payments.insertOne(fields);
+  } catch (error) {
+    if (!isDuplicateKeyError(error)) throw error;
+  }
 }
 
 async function recordFailedPayment(
@@ -321,7 +478,7 @@ async function recordFailedPayment(
   const now = new Date();
 
   if (existing) {
-    if (existing.status !== 'paid') {
+    if (!NON_REVERSIBLE_PAYMENT_STATUSES.includes(String(existing.status))) {
       await payments.updateOne(
         { _id: existing._id },
         { $set: { ...fields, status: 'failed', updatedAt: now } },
@@ -342,7 +499,7 @@ async function recordFailedPayment(
   }
 }
 
-/** An abandoned Checkout session leaves the booking ready for a retry. */
+/** An expired Checkout session releases the stock it was holding. */
 export async function markCheckoutSessionFailed(
   session: Stripe.Checkout.Session,
 ): Promise<void> {
@@ -350,8 +507,36 @@ export async function markCheckoutSessionFailed(
   if (!bookingId) return;
 
   const booking = await findBookingById(bookingId);
+  if (!booking) return;
+  if (
+    NON_REVERSIBLE_PAYMENT_STATUSES.includes(String(booking.paymentStatus ?? ''))
+  ) {
+    return;
+  }
+
   const now = new Date();
   await setBookingPaymentStatus(bookingId, 'failed');
+
+  const released = await getDb().collection('bookings').updateOne(
+    {
+      _id: bookingId,
+      bookingStatus: { $in: ['pending', 'upcoming'] },
+      paymentStatus: { $in: ['unpaid', 'pending', 'failed'] },
+    },
+    {
+      $set: {
+        bookingStatus: 'cancelled',
+        paymentStatus: 'failed',
+        cancellationReason: 'checkout_expired',
+        updatedAt: now,
+      },
+    },
+  );
+  if (released.modifiedCount > 0) {
+    console.log(
+      `Released stock for expired Checkout session ${session.id} (${String(booking.bookingRef ?? bookingId)}).`,
+    );
+  }
 
   await recordFailedPayment(
     { stripeSessionId: session.id },
@@ -386,6 +571,13 @@ export async function markPaymentIntentFailed(
   if (!bookingId) return;
 
   const booking = await findBookingById(bookingId);
+  if (
+    booking &&
+    NON_REVERSIBLE_PAYMENT_STATUSES.includes(String(booking.paymentStatus ?? ''))
+  ) {
+    return;
+  }
+
   const now = new Date();
   await setBookingPaymentStatus(bookingId, 'failed');
 
@@ -405,6 +597,56 @@ export async function markPaymentIntentFailed(
   );
 }
 
+/** Records Stripe's refund events without ever marking a refund as paid. */
+export async function markPaymentRefunded(info: RefundInfo): Promise<void> {
+  const intentId = asText(info.paymentIntentId);
+  if (!intentId) return;
+
+  await ensurePaymentIndexes();
+  const payments = getDb().collection('payments');
+  const bookings = getDb().collection('bookings');
+  const payment = await payments.findOne({ paymentIntentId: intentId });
+  if (!payment || String(payment.status) === 'refunded') return;
+
+  const originalAmount = Number(payment.amount ?? 0);
+  const refundedAmount =
+    typeof info.amount === 'number' ? info.amount : originalAmount;
+  const full =
+    info.full ?? (originalAmount <= 0 ? true : refundedAmount >= originalAmount);
+  const now = new Date();
+  const refundId = asText(info.refundId) || asText(payment.refundId);
+
+  await payments.updateOne(
+    { _id: payment._id, status: { $nin: ['refunded', 'partially_refunded'] } },
+    {
+      $set: {
+        status: full ? 'refunded' : 'partially_refunded',
+        ...(refundId ? { refundId } : {}),
+        refundedAmount,
+        refundedAt: now,
+        updatedAt: now,
+      },
+    },
+  );
+
+  if (payment.bookingId) {
+    await bookings.updateOne(
+      {
+        _id: payment.bookingId,
+        paymentStatus: { $ne: 'refunded' },
+      },
+      {
+        $set: {
+          paymentStatus: 'refunded',
+          ...(refundId ? { refundId } : {}),
+          refundedAt: now,
+          updatedAt: now,
+        },
+      },
+    );
+  }
+}
+
 /** Refunds the captured Stripe charge when a paid booking is cancelled. */
 export async function refundBookingPayment(
   bookingId: NonNullable<ReturnType<typeof toObjectId>>,
@@ -414,26 +656,43 @@ export async function refundBookingPayment(
   const payment = await payments.findOne({ bookingId, status: 'paid' });
 
   // Legacy/admin-marked bookings have no Stripe record to refund.
-  if (!payment || !asText(payment.paymentIntentId)) {
+  if (!payment) {
+    const alreadyRefunded = await payments.findOne({
+      bookingId,
+      status: { $in: ['refunded', 'partially_refunded'] },
+    });
+    return { ok: true, refunded: false, alreadyRefunded: Boolean(alreadyRefunded) };
+  }
+
+  const intentId = asText(payment.paymentIntentId);
+  if (!intentId) {
     return { ok: true, refunded: false };
   }
 
   try {
-    const refund = await getStripe().refunds.create({
-      payment_intent: asText(payment.paymentIntentId),
-      reason: 'requested_by_customer',
-    });
+    // The deterministic key makes concurrent/retried cancels a single refund.
+    const refund = await createRefund(intentId, `yc-refund-booking-${bookingId}`);
+    const amount = Number(payment.amount ?? 0);
+    const full =
+      typeof refund.amount === 'number' && amount > 0
+        ? refund.amount >= amount
+        : true;
 
     await payments.updateOne(
-      { _id: payment._id },
+      { _id: payment._id, status: { $ne: 'refunded' } },
       {
         $set: {
-          status: 'refunded',
+          status: full ? 'refunded' : 'partially_refunded',
           refundId: refund.id,
+          refundedAmount: Number(refund.amount ?? amount),
           refundedAt: new Date(),
           updatedAt: new Date(),
         },
       },
+    );
+    await getDb().collection('bookings').updateOne(
+      { _id: bookingId, paymentStatus: 'paid' },
+      { $set: { paymentStatus: 'refunded', updatedAt: new Date() } },
     );
     return { ok: true, refunded: true };
   } catch (error) {

@@ -4,7 +4,7 @@ import { getDb } from '../db.js';
 import { decorateEquipmentList } from '../lib/equipment-service.js';
 import { badRequest, serverError, uidParam } from '../lib/http.js';
 import { toApi, toObjectId } from '../lib/ids.js';
-import { verifyToken } from '../middleware/jwt-auth.js';
+import { verifyRenter, verifyToken } from '../middleware/jwt-auth.js';
 
 const router = Router();
 
@@ -12,7 +12,7 @@ const router = Router();
  * GET /api/favorites
  * Saved listings for the signed-in customer.
  */
-router.get('/', verifyToken, async (request: Request, response: Response) => {
+router.get('/', verifyToken, verifyRenter, async (request: Request, response: Response) => {
   try {
     const userId = toObjectId(request.user!.id);
     if (!userId) {
@@ -56,7 +56,7 @@ router.get('/', verifyToken, async (request: Request, response: Response) => {
  * POST /api/favorites
  * Saves a listing. Calling it twice keeps a single row.
  */
-router.post('/', verifyToken, async (request: Request, response: Response) => {
+router.post('/', verifyToken, verifyRenter, async (request: Request, response: Response) => {
   try {
     const userId = toObjectId(request.user!.id);
     const body = request.body ?? {};
@@ -116,7 +116,7 @@ router.post('/', verifyToken, async (request: Request, response: Response) => {
  * DELETE /api/favorites/:equipmentId
  * Removes a saved listing; safe to call when it is already gone.
  */
-router.delete('/:equipmentId', verifyToken, async (request: Request, response: Response) => {
+router.delete('/:equipmentId', verifyToken, verifyRenter, async (request: Request, response: Response) => {
   try {
     const userId = toObjectId(request.user!.id);
     const equipmentId = toObjectId(uidParam(request, 'equipmentId'));

@@ -1,5 +1,7 @@
 import Stripe from 'stripe';
 
+const STRIPE_TIMEOUT_MS = 10_000;
+
 let stripe: Stripe | undefined;
 
 /**
@@ -13,7 +15,7 @@ export function getStripe(): Stripe {
   }
 
   if (!stripe) {
-    stripe = new Stripe(secretKey);
+    stripe = new Stripe(secretKey, { timeout: STRIPE_TIMEOUT_MS });
   }
   return stripe;
 }

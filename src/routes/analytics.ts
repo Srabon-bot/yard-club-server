@@ -26,6 +26,8 @@ const MONTH_LABELS = [
   'Dec',
 ];
 
+const PAID_PAYMENT_STATUSES = ['paid', 'refunded', 'partially_refunded'];
+
 type MonthBucket = {
   key: string;
   month: string;
@@ -55,32 +57,45 @@ type AnalyticsScope = {
   bookingFilter: Filter<Document>;
   equipmentFilter: Filter<Document>;
   paymentFilter: Filter<Document>;
+  /** Owners only see themselves here; admins see the platform. */
+  userFilter?: Filter<Document>;
 };
 
 type RevenueEntry = {
   bookingId: string;
-  amount: number;
+  gross: number;
+  refunded: number;
+  net: number;
   date: Date;
 };
 
 /**
- * Payments are the source of truth for new transactions. Paid bookings with no
- * matching payment record are seeded/legacy data and still count, so existing
- * dashboard numbers do not disappear after Stripe is introduced.
+ * Payments are the source of truth. Paid bookings with no matching payment
+ * record are seeded/legacy data and still count. Refunds reduce net revenue
+ * instead of being silently dropped.
  */
-function revenueEntries(bookings: Document[], payments: Document[]): RevenueEntry[] {
+export function revenueEntries(
+  bookings: Document[],
+  payments: Document[],
+): RevenueEntry[] {
   const recordedBookingIds = new Set(
     payments.map((payment) => String(payment.bookingId ?? '')).filter(Boolean),
   );
   const entries: RevenueEntry[] = [];
 
   for (const payment of payments) {
-    if (payment.status !== 'paid') continue;
-    const date = new Date(String(payment.paidAt ?? payment.createdAt ?? ''));
+    if (!PAID_PAYMENT_STATUSES.includes(String(payment.status))) continue;
+    const gross = Number(payment.amount ?? 0);
+    const refunded =
+      String(payment.status) === 'refunded' && payment.refundedAmount === undefined
+        ? gross
+        : Number(payment.refundedAmount ?? 0);
     entries.push({
       bookingId: String(payment.bookingId ?? ''),
-      amount: Number(payment.amount ?? 0),
-      date,
+      gross,
+      refunded,
+      net: Math.max(0, gross - refunded),
+      date: new Date(String(payment.paidAt ?? payment.createdAt ?? '')),
     });
   }
 
@@ -90,17 +105,18 @@ function revenueEntries(bookings: Document[], payments: Document[]): RevenueEntr
     if (booking.paymentStatus !== 'paid' || booking.bookingStatus === 'cancelled') {
       continue;
     }
-    entries.push({
-      bookingId,
-      amount: Number(booking.total ?? 0),
-      date: new Date(String(booking.createdAt ?? '')),
-    });
+    const gross = Number(booking.total ?? 0);
+    // Legacy rows have no paidAt, so prefer the payment/fulfilment timestamp.
+    const date = new Date(
+      String(booking.paidAt ?? booking.updatedAt ?? booking.createdAt ?? ''),
+    );
+    entries.push({ bookingId, gross, refunded: 0, net: gross, date });
   }
 
   return entries.filter(
     (entry) =>
-      Number.isFinite(entry.amount) &&
-      entry.amount > 0 &&
+      Number.isFinite(entry.gross) &&
+      entry.gross > 0 &&
       !Number.isNaN(entry.date.getTime()),
   );
 }
@@ -110,22 +126,26 @@ async function totalsFor(scope: AnalyticsScope) {
   const [bookings, equipment, users, payments] = await Promise.all([
     db.collection('bookings').find(scope.bookingFilter).toArray(),
     db.collection('equipment').find(scope.equipmentFilter).toArray(),
-    db.collection('user').find({}).project({ role: 1 }).toArray(),
+    db
+      .collection('user')
+      .find(scope.userFilter ?? {})
+      .project({ role: 1 })
+      .toArray(),
     db.collection('payments').find(scope.paymentFilter).toArray(),
   ]);
 
   const completed = bookings.filter(
     (booking) => booking.bookingStatus === 'completed',
   );
-  const revenue = revenueEntries(bookings, payments).reduce(
-    (sum, entry) => sum + entry.amount,
-    0,
-  );
+  const entries = revenueEntries(bookings, payments);
+  const grossRevenue = entries.reduce((sum, entry) => sum + entry.gross, 0);
+  const refunds = entries.reduce((sum, entry) => sum + entry.refunded, 0);
+  const revenue = entries.reduce((sum, entry) => sum + entry.net, 0);
 
   return {
     bookings,
     equipment,
-    payments,
+    entries,
     totals: {
       users: users.length,
       equipment: equipment.length,
@@ -133,6 +153,8 @@ async function totalsFor(scope: AnalyticsScope) {
       pendingApprovals: equipment.filter((item) => item.status === 'pending').length,
       completedRentals: completed.length,
       revenue,
+      grossRevenue,
+      refunds,
       listedEquipment: equipment.filter((item) => item.status === 'approved').length,
       completedOwnerRentals: completed.length,
       earnings: revenue,
@@ -156,7 +178,7 @@ function buildAnalytics(
 
   for (const entry of entries) {
     const bucket = byKey.get(monthKey(entry.date.toISOString()));
-    if (bucket) bucket.revenue += entry.amount;
+    if (bucket) bucket.revenue += entry.net;
   }
 
   const categories = new Map<string, number>();
@@ -189,14 +211,12 @@ router.get(
   verifyAdmin,
   async (_request: Request, response: Response) => {
     try {
-      const { bookings, equipment, totals, payments } = await totalsFor({
+      const { bookings, equipment, totals, entries } = await totalsFor({
         bookingFilter: {},
         equipmentFilter: {},
-        paymentFilter: { status: { $in: ['paid', 'refunded'] } },
+        paymentFilter: { status: { $in: PAID_PAYMENT_STATUSES } },
       });
-      response.json(
-        buildAnalytics(bookings, equipment, totals, revenueEntries(bookings, payments)),
-      );
+      response.json(buildAnalytics(bookings, equipment, totals, entries));
     } catch (error) {
       console.error('Failed to load admin analytics:', error);
       serverError(response, 'Failed to load platform analytics.');
@@ -207,7 +227,7 @@ router.get(
 /**
  * GET /api/analytics/owner
  * The signed-in owner's month series. Admins may pass `ownerId` to inspect
- * a specific owner.
+ * a specific owner. User counts are limited to that owner, never platform-wide.
  */
 router.get(
   '/owner',
@@ -228,14 +248,13 @@ router.get(
         return;
       }
 
-      const { bookings, equipment, totals, payments } = await totalsFor({
+      const { bookings, equipment, totals, entries } = await totalsFor({
         bookingFilter: { ownerId },
         equipmentFilter: { ownerId },
-        paymentFilter: { ownerId, status: { $in: ['paid', 'refunded'] } },
+        paymentFilter: { ownerId, status: { $in: PAID_PAYMENT_STATUSES } },
+        userFilter: { _id: ownerId },
       });
-      response.json(
-        buildAnalytics(bookings, equipment, totals, revenueEntries(bookings, payments)),
-      );
+      response.json(buildAnalytics(bookings, equipment, totals, entries));
     } catch (error) {
       console.error('Failed to load owner analytics:', error);
       serverError(response, 'Failed to load your analytics.');

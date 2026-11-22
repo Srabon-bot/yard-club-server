@@ -19,7 +19,11 @@ import {
   uidParam,
 } from '../lib/http.js';
 import { toApi, toObjectId } from '../lib/ids.js';
-import { verifyRenter, verifyToken } from '../middleware/jwt-auth.js';
+import {
+  verifyOwnerOrAdmin,
+  verifyRenter,
+  verifyToken,
+} from '../middleware/jwt-auth.js';
 import { notifyBookingCompleted } from '../services/booking-notifications.js';
 import {
   createBookingCheckout,
@@ -42,6 +46,24 @@ const PAYMENT_STATUSES = new Set([
   'refunded',
   'failed',
 ]);
+
+/** Basic fulfilment lifecycle. Terminal states cannot be reopened. */
+const BOOKING_TRANSITIONS: Record<string, string[]> = {
+  pending: ['upcoming', 'cancelled'],
+  upcoming: ['active', 'cancelled'],
+  active: ['completed', 'cancelled'],
+  completed: [],
+  cancelled: [],
+};
+
+/** Refunds and paid records are terminal for payment status changes. */
+const PAYMENT_TRANSITIONS: Record<string, string[]> = {
+  unpaid: ['pending', 'paid', 'failed'],
+  pending: ['unpaid', 'paid', 'failed'],
+  failed: ['unpaid', 'pending', 'paid'],
+  paid: ['refunded'],
+  refunded: [],
+};
 
 function asDate(value: string): Date {
   return new Date(`${value}T00:00:00.000Z`);
@@ -95,7 +117,7 @@ function statusClause(request: Request): string {
  * A signed-in user requests a rental. The booking starts as pending/unpaid
  * until the Stripe checkout is added; pending reservations still hold stock.
  */
-router.post('/', verifyToken, async (request: Request, response: Response) => {
+router.post('/', verifyToken, verifyRenter, async (request: Request, response: Response) => {
   try {
     const user = request.user!;
     const customerId = toObjectId(user.id);
@@ -256,13 +278,9 @@ router.get('/mine', verifyToken, verifyRenter, async (request: Request, response
  * GET /api/bookings
  * Owners see bookings for their own equipment; admins see every booking.
  */
-router.get('/', verifyToken, async (request: Request, response: Response) => {
+router.get('/', verifyToken, verifyOwnerOrAdmin, async (request: Request, response: Response) => {
   try {
     const user = request.user!;
-    if (user.role !== 'owner' && user.role !== 'admin') {
-      response.status(403).json({ error: 'This view needs owner or admin access.' });
-      return;
-    }
 
     const status = statusClause(request);
     if (status === '__invalid__') {
@@ -320,8 +338,9 @@ router.get('/', verifyToken, async (request: Request, response: Response) => {
 
 /**
  * POST /api/bookings/:id/checkout
- * The renter starts Stripe Checkout only after the owner confirmed the dates.
- * The amount always comes from the stored booking, never from the request.
+ * The renter can pay once the request exists, whether it is still pending or
+ * already confirmed by the owner. The amount always comes from the stored
+ * booking, never from the request.
  */
 router.post(
   '/:id/checkout',
@@ -348,13 +367,15 @@ router.post(
         response.status(404).json({ error: 'Booking not found.' });
         return;
       }
-      if (booking.bookingStatus !== 'upcoming') {
+      const bookingStatus = String(booking.bookingStatus);
+      if (!['pending', 'upcoming'].includes(bookingStatus)) {
         response.status(409).json({
-          error: 'The owner must confirm your booking before you can pay.',
+          error: 'This booking can no longer be paid.',
         });
         return;
       }
-      if (!['unpaid', 'pending', 'failed'].includes(String(booking.paymentStatus))) {
+      const paymentStatus = String(booking.paymentStatus);
+      if (['paid', 'refunded'].includes(paymentStatus)) {
         response.status(409).json({ error: 'This booking is already paid.' });
         return;
       }
@@ -405,6 +426,20 @@ router.patch('/:id', verifyToken, async (request: Request, response: Response) =
     const body = request.body ?? {};
     const update: Record<string, unknown> = {};
 
+    if ('paymentStatus' in body) {
+      if (!isAdmin) {
+        response.status(403).json({
+          error: 'Only an admin can change a payment status.',
+        });
+        return;
+      }
+      const paymentStatus = text(body.paymentStatus);
+      if (!PAYMENT_STATUSES.has(paymentStatus)) {
+        return badRequest(response, 'paymentStatus', 'Unknown payment status.');
+      }
+      update.paymentStatus = paymentStatus;
+    }
+
     if ('bookingStatus' in body) {
       const bookingStatus = text(body.bookingStatus);
       if (!BOOKING_STATUSES.has(bookingStatus)) {
@@ -425,21 +460,47 @@ router.patch('/:id', verifyToken, async (request: Request, response: Response) =
           return;
         }
       }
-      update.bookingStatus = bookingStatus;
-    }
 
-    if ('paymentStatus' in body) {
-      if (!isAdmin) {
-        response.status(403).json({
-          error: 'Only an admin can change a payment status.',
+      const currentStatus = String(booking.bookingStatus);
+      if (
+        bookingStatus !== currentStatus &&
+        !(BOOKING_TRANSITIONS[currentStatus] ?? []).includes(bookingStatus)
+      ) {
+        response.status(409).json({
+          error: `Cannot change a ${currentStatus} booking to ${bookingStatus}.`,
         });
         return;
       }
-      const paymentStatus = text(body.paymentStatus);
-      if (!PAYMENT_STATUSES.has(paymentStatus)) {
-        return badRequest(response, 'paymentStatus', 'Unknown payment status.');
+
+      if (bookingStatus === 'completed') {
+        const effectivePayment = String(
+          update.paymentStatus ?? booking.paymentStatus ?? 'unpaid',
+        );
+        if (effectivePayment !== 'paid') {
+          response.status(409).json({
+            error: 'A booking must be paid before it can be completed.',
+          });
+          return;
+        }
       }
-      update.paymentStatus = paymentStatus;
+
+      update.bookingStatus = bookingStatus;
+    }
+
+    if (
+      'paymentStatus' in update &&
+      update.paymentStatus !== booking.paymentStatus
+    ) {
+      const currentPayment = String(booking.paymentStatus ?? 'unpaid');
+      const nextPayment = String(update.paymentStatus);
+      if (
+        !(PAYMENT_TRANSITIONS[currentPayment] ?? []).includes(nextPayment)
+      ) {
+        response.status(409).json({
+          error: `Cannot change payment status from ${currentPayment} to ${nextPayment}.`,
+        });
+        return;
+      }
     }
 
     if (Object.keys(update).length === 0) {

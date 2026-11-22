@@ -34,6 +34,26 @@ export function slugFor(name: string): string {
     .slice(0, 60);
 }
 
+/**
+ * Review-count-weighted mean across rated listings, shared by the catalogue
+ * stats, landing-page stats and public owner cards.
+ */
+export function averageEquipmentRating(items: Document[]): number {
+  const rated = items.filter((item) => Number(item.reviewCount ?? 0) > 0);
+  const reviews = rated.reduce(
+    (sum, item) => sum + Number(item.reviewCount ?? 0),
+    0,
+  );
+  if (reviews === 0) return 0;
+  return (
+    rated.reduce(
+      (sum, item) =>
+        sum + Number(item.rating ?? 0) * Number(item.reviewCount ?? 0),
+      0,
+    ) / reviews
+  );
+}
+
 export function toApiUser(user: Document): ApiUser {
   const name = String(user.name ?? 'Yardclub user');
   return {

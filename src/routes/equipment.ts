@@ -4,6 +4,7 @@ import type { Document, Filter, ObjectId } from 'mongodb';
 import { getDb } from '../db.js';
 import {
   availabilityFor,
+  averageEquipmentRating,
   decorateEquipment,
   decorateEquipmentList,
   HOLD_STATUSES,
@@ -121,6 +122,7 @@ function publicFilter(request: Request): Filter<Document> | null {
       { model: term },
       { description: term },
       { location: term },
+      { category: term },
       { features: term },
     ];
   }
@@ -238,10 +240,7 @@ router.get('/stats', async (_request: Request, response: Response) => {
       categories: new Set(documents.map((item) => String(item.category))).size,
       cities: cities.size,
       minRate: rates.length ? Math.min(...rates) : 0,
-      averageRating: documents.length
-        ? documents.reduce((sum, item) => sum + Number(item.rating ?? 0), 0) /
-          documents.length
-        : 0,
+      averageRating: averageEquipmentRating(documents),
       reviewCount: documents.reduce(
         (sum, item) => sum + Number(item.reviewCount ?? 0),
         0,
