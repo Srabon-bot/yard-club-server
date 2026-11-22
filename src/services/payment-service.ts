@@ -280,6 +280,34 @@ export async function finalizePaidBooking(
     },
   );
 
+  // A renter can cancel while Checkout is still open. If payment lands after
+  // that, refund it immediately instead of leaving a paid cancelled booking.
+  if (booking.bookingStatus === 'cancelled' && intentId) {
+    try {
+      const refund = await getStripe().refunds.create({
+        payment_intent: intentId,
+        reason: 'requested_by_customer',
+      });
+      await payments.updateOne(
+        { stripeSessionId: session.id },
+        {
+          $set: {
+            status: 'refunded',
+            refundId: refund.id,
+            refundedAt: new Date(),
+            updatedAt: new Date(),
+          },
+        },
+      );
+      await bookings.updateOne(
+        { _id: bookingId },
+        { $set: { paymentStatus: 'refunded', updatedAt: new Date() } },
+      );
+    } catch (error) {
+      console.error('Automatic refund after cancelled Checkout failed:', error);
+    }
+  }
+
   return { ok: true, bookingId: String(bookingId), alreadyRecorded };
 }
 
