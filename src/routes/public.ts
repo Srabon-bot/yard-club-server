@@ -299,15 +299,35 @@ router.get('/reviews', async (request: Request, response: Response) => {
   }
 });
 
+/** In-memory cache for /api/stats to avoid recalculating on every hit */
+let cachedStats: { data: Record<string, unknown>; expiresAt: number } | null = null;
+const STATS_CACHE_TTL_MS = 60_000; // 60 seconds
+
 /**
  * GET /api/stats
  * Public counters used by the landing page and catalogue hero.
  */
 router.get('/stats', async (_request: Request, response: Response) => {
   try {
+    const now = Date.now();
+    if (cachedStats && cachedStats.expiresAt > now) {
+      response.setHeader('Cache-Control', 'public, max-age=60, s-maxage=60, stale-while-revalidate=120');
+      response.json(cachedStats.data);
+      return;
+    }
+
     const db = getDb();
     const [equipment, users, bookings, reviews, categories] = await Promise.all([
-      db.collection('equipment').find({}).toArray(),
+      db.collection('equipment').find({}).project({
+        _id: 1,
+        status: 1,
+        featured: 1,
+        location: 1,
+        pricePerDay: 1,
+        quantity: 1,
+        rating: 1,
+        reviewCount: 1,
+      }).toArray(),
       db.collection('user').find({}).project({ role: 1 }).toArray(),
       db
         .collection('bookings')
@@ -324,7 +344,7 @@ router.get('/stats', async (_request: Request, response: Response) => {
     const cities = new Set(
       approved.map((item) => String(item.location ?? '').split(',').pop()?.trim()),
     );
-    response.json({
+    const statsData = {
       equipment: {
         total: equipment.length,
         approved: approved.length,
@@ -362,7 +382,11 @@ router.get('/stats', async (_request: Request, response: Response) => {
       reviews,
       minRate: rates.length ? Math.min(...rates) : 0,
       averageRating: averageEquipmentRating(approved),
-    });
+    };
+
+    cachedStats = { data: statsData, expiresAt: now + STATS_CACHE_TTL_MS };
+    response.setHeader('Cache-Control', 'public, max-age=60, s-maxage=60, stale-while-revalidate=120');
+    response.json(statsData);
   } catch (error) {
     console.error('Failed to load platform stats:', error);
     serverError(response, 'Failed to load platform statistics.');
