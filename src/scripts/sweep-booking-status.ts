@@ -6,8 +6,7 @@ import { sweepBookingStatuses } from '../services/booking-status.js';
 
 /** One-shot runner for manual catch-up and smoke tests. */
 async function run(): Promise<void> {
-  const connection = await connectToMongoDB();
-  if (!connection) throw new Error('Could not connect to MongoDB.');
+  await connectToMongoDB();
 
   try {
     const { activated, completed, notified } = await sweepBookingStatuses();

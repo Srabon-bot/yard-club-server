@@ -12,20 +12,24 @@
   "name": "yardclub-server",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "dist/app.js",
   "scripts": {
     "dev": "nodemon --exec tsx src/app.ts",
     "dev:tsx": "tsx watch src/app.ts",
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "start": "node dist/app.js",
     "typecheck": "tsc --noEmit",
     "bookings:sweep": "tsx src/scripts/sweep-booking-status.ts",
+    "admin:promote": "tsx src/scripts/promote-admin.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "devDependencies": {
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",

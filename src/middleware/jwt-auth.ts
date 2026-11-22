@@ -6,6 +6,7 @@ import { slugify, toObjectId } from '../lib/ids.js';
 import type { RequestUser } from '../types/user.js';
 
 const ROLES = new Set<RequestUser['role']>(['customer', 'owner', 'admin']);
+const JWKS_TIMEOUT_MS = 3_000;
 
 let jwks: ReturnType<typeof createRemoteJWKSet> | undefined;
 
@@ -18,11 +19,62 @@ function clientUrl(): string {
   ).replace(/\/+$/, '');
 }
 
+function jwksUrl(): URL {
+  return new URL(`${clientUrl()}/api/auth/jwks`);
+}
+
 function getJwks(): ReturnType<typeof createRemoteJWKSet> {
   if (!jwks) {
-    jwks = createRemoteJWKSet(new URL(`${clientUrl()}/api/auth/jwks`));
+    jwks = createRemoteJWKSet(jwksUrl(), {
+      timeoutDuration: JWKS_TIMEOUT_MS,
+      cooldownDuration: 10_000,
+      cacheMaxAge: 10 * 60_000,
+    });
   }
   return jwks;
+}
+
+/**
+ * Logs configuration problems without throwing. Production must set CLIENT_URL;
+ * the localhost fallback exists only to keep local development usable.
+ */
+export function validateAuthConfig(): void {
+  if (!process.env.CLIENT_URL && !process.env.BETTER_AUTH_URL) {
+    console.error(
+      'CLIENT_URL is not configured; JWT issuer/audience and the JWKS URL fall back to localhost. Cross-origin requests may be blocked.',
+    );
+    return;
+  }
+  try {
+    const url = jwksUrl();
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      console.error('CLIENT_URL must be an http(s) URL; JWT verification will fail.');
+    }
+  } catch {
+    console.error('CLIENT_URL is not a valid URL; JWT verification will fail.');
+  }
+}
+
+/**
+ * Best-effort JWKS warm-up. A slow or bad JWKS endpoint must never keep the
+ * server (or a request) waiting, so failures are only logged.
+ */
+export function warmJwksConfig(): void {
+  try {
+    void getJwks()
+      .reload()
+      .catch((error: unknown) => {
+        console.warn(
+          'Could not warm the JWKS cache:',
+          error instanceof Error ? error.message : error,
+        );
+      });
+  } catch (error) {
+    console.warn(
+      'Could not configure the JWKS cache:',
+      error instanceof Error ? error.message : error,
+    );
+  }
 }
 
 function roleFrom(value: unknown): RequestUser['role'] {
@@ -79,7 +131,9 @@ async function resolveUser(payload: JWTPayload): Promise<Document | null> {
     email,
     emailVerified: false,
     image: null,
-    role: roleFrom(payload.role),
+    // Never inherit an elevated role from a JWT; the Mongo record is
+    // authoritative and first-time sign-ins are always renters.
+    role: 'customer',
     phone: '',
     createdAt: now,
     updatedAt: now,
